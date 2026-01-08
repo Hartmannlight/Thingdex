@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:15
+    container_name: thingdex-db
+    environment:
+      POSTGRES_USER: thingdex
+      POSTGRES_PASSWORD: thingdex
+      POSTGRES_DB: thingdex
+      ROOT_LOCATION_NAME: World
+    ports:
+      - "5432:5432"
+    volumes:
+      - thingdex_pgdata:/var/lib/postgresql/data
+
+volumes:
+  thingdex_pgdata:
