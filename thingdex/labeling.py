@@ -56,7 +56,7 @@ def required_template_variables(template: dict[str, Any]) -> list[str]:
 
 
 def validate_template_against_schema(template: dict[str, Any], schema: dict[str, Any]) -> list[str]:
-    required = required_template_variables(template)
+    required = [name for name in required_template_variables(template) if name != "internal_uuid"]
     fields = schema.get("fields", {}) if isinstance(schema, dict) else {}
     missing: list[str] = []
     for name in required:

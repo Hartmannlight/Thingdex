@@ -1,11 +1,13 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+import datetime as dt
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from thingdex.db import SessionLocal
 from thingdex.labeling import LabelServiceError, fetch_template, validate_template_against_schema
-from thingdex.models import ItemType
+from thingdex.models import Item, ItemType
 from thingdex.schemas import ItemTypeCreate, ItemTypeOut, ItemTypeUpdate
 
 router = APIRouter(prefix="/v1/item-types", tags=["item-types"])
@@ -49,16 +51,28 @@ def create_item_type(payload: ItemTypeCreate, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=list[ItemTypeOut])
-def list_item_types(db: Session = Depends(get_db)):
+def list_item_types(
+    limit: int | None = Query(default=None, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    include_deleted: bool = Query(default=False),
+    db: Session = Depends(get_db),
+):
     """List all item types."""
-    return db.query(ItemType).order_by(ItemType.name).all()
+    query = db.query(ItemType).order_by(ItemType.name)
+    if not include_deleted:
+        query = query.filter(ItemType.deleted_at.is_(None))
+    if offset:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()
 
 
 @router.get("/{item_type_id}", response_model=ItemTypeOut)
 def get_item_type(item_type_id: UUID, db: Session = Depends(get_db)):
     """Fetch a single item type by ID."""
     item_type = db.get(ItemType, item_type_id)
-    if not item_type:
+    if not item_type or item_type.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Item type not found")
     return item_type
 
@@ -67,7 +81,7 @@ def get_item_type(item_type_id: UUID, db: Session = Depends(get_db)):
 def update_item_type(item_type_id: UUID, payload: ItemTypeUpdate, db: Session = Depends(get_db)):
     """Update name/schema/ui for an existing item type."""
     item_type = db.get(ItemType, item_type_id)
-    if not item_type:
+    if not item_type or item_type.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Item type not found")
     if payload.name is not None:
         item_type.name = payload.name
@@ -110,3 +124,16 @@ def update_item_type(item_type_id: UUID, payload: ItemTypeUpdate, db: Session = 
     db.commit()
     db.refresh(item_type)
     return item_type
+
+
+@router.delete("/{item_type_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_item_type(item_type_id: UUID, db: Session = Depends(get_db)):
+    """Delete an item type if no items reference it."""
+    item_type = db.get(ItemType, item_type_id)
+    if not item_type or item_type.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Item type not found")
+    if db.query(Item.id).filter(Item.type_id == item_type_id, Item.deleted_at.is_(None)).first():
+        raise HTTPException(status_code=409, detail="Item type has existing items")
+    item_type.deleted_at = dt.datetime.now(dt.timezone.utc)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

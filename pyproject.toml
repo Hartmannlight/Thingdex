@@ -17,6 +17,15 @@ dependencies = [
     "uvicorn[standard]>=0.30",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+addopts = "-p no:cacheprovider"
+norecursedirs = ["pytest-cache-files-*"]
+
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

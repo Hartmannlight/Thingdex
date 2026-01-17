@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
@@ -33,6 +34,11 @@ class LocationOut(LocationBase):
 class LocationPathItem(BaseModel):
     id: UUID
     name: str
+
+
+class LocationTreeNode(LocationBase):
+    id: UUID
+    children: list["LocationTreeNode"] = Field(default_factory=list)
 
 
 class ItemTypeBase(BaseModel):
@@ -71,11 +77,13 @@ class ItemBase(BaseModel):
 
 class LabelPrintRequest(BaseModel):
     printer_id: str
+    template_id: str | None = None
     return_preview: bool | None = None
 
 
 class LabelReprintRequest(BaseModel):
     printer_id: str
+    template_id: str | None = None
     item_id: UUID | None = None
     location_id: UUID | None = None
     return_preview: bool | None = None
@@ -85,6 +93,32 @@ class ItemCreate(ItemBase):
     type: str | None = Field(default=None, description="Type name")
     type_id: UUID | None = Field(default=None, description="Type ID")
     label_print: LabelPrintRequest | None = None
+
+
+class ItemBulkCreateItem(ItemBase):
+    type: str | None = Field(default=None, description="Type name")
+    type_id: UUID | None = Field(default=None, description="Type ID")
+
+
+class ItemBulkCreate(BaseModel):
+    items: list[ItemBulkCreateItem]
+
+
+class ItemBulkUpdateItem(BaseModel):
+    id: UUID
+    status: str | None = None
+    description: str | None = None
+    props: dict[str, Any] | None = None
+    source: str | None = None
+
+
+class ItemBulkUpdate(BaseModel):
+    items: list[ItemBulkUpdateItem]
+
+
+class ItemBulkMove(BaseModel):
+    item_ids: list[UUID]
+    location_id: UUID
 
 
 class ItemUpdate(BaseModel):
@@ -137,7 +171,10 @@ class ItemRelationCreate(BaseModel):
 
 
 class ItemRelationUpdate(BaseModel):
-    active: bool
+    active: bool | None = None
+    quantity: int | None = None
+    slot: str | None = None
+    notes: str | None = None
 
 
 class ItemRelationDetach(BaseModel):
@@ -154,7 +191,7 @@ class ItemRelationOut(BaseModel):
     quantity: int | None = None
     slot: str | None = None
     notes: str | None = None
-    created_at: str
+    created_at: datetime
 
 
 class ItemPropHistoryOut(BaseModel):
@@ -162,7 +199,7 @@ class ItemPropHistoryOut(BaseModel):
     id: UUID
     item_id: UUID
     prop_key: str
-    captured_at: str
+    captured_at: datetime
     value: Any
     source: str | None = None
 
@@ -180,7 +217,7 @@ class ItemSnapshotOut(BaseModel):
     id: UUID
     item_id: UUID
     kind: str
-    captured_at: str
+    captured_at: datetime
     data_text: str | None = None
     data: dict[str, Any] | None = None
     meta: dict[str, Any]

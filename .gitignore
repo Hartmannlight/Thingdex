@@ -1,0 +1,32 @@
+# IDEs and editors
+.idea/
+.vscode/
+*.code-workspace
+
+# Codex CLI artifacts
+codex.exe
+.codex/
+
+# Python caches and virtualenvs
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyright/
+.tox/
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Environment files
+.env
+.env.*
+
+# OS files
+.DS_Store

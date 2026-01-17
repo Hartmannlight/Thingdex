@@ -14,6 +14,11 @@ Backend API for the household inventory system described in `project-idea.md`.
 
 The API listens on `http://127.0.0.1:8000` and exposes OpenAPI docs at `/docs`.
 
+## Testing
+- Ensure Postgres is running (see Quick Start step 1).
+- Optional: override the test database URL with `THINGDEX_TEST_DATABASE_URL`.
+- Run: `poetry run pytest`
+
 ## Configuration
 - `DATABASE_URL` (default: `postgresql+psycopg://thingdex:thingdex@localhost:5432/thingdex`)
 - `ROOT_LOCATION_NAME` (default: `World`)

@@ -15,6 +15,7 @@ class Location(Base):
     parent_id = Column(UUID(as_uuid=True), ForeignKey("locations.id", ondelete="CASCADE"))
     kind = Column(Text)
     meta = Column(JSONB, nullable=False, server_default="{}")
+    deleted_at = Column(DateTime(timezone=True))
 
 
 class ItemType(Base):
@@ -25,6 +26,7 @@ class ItemType(Base):
     schema = Column(JSONB, nullable=False, server_default="{}")
     ui = Column(JSONB, nullable=False, server_default="{}")
     label_template_id = Column(Text)
+    deleted_at = Column(DateTime(timezone=True))
 
 
 class Item(Base):
@@ -38,6 +40,7 @@ class Item(Base):
     description = Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    deleted_at = Column(DateTime(timezone=True))
 
 
 class ItemRelation(Base):
@@ -52,6 +55,7 @@ class ItemRelation(Base):
     slot = Column(Text)
     notes = Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    deleted_at = Column(DateTime(timezone=True))
 
 
 class ItemPropHistory(Base):
@@ -63,6 +67,7 @@ class ItemPropHistory(Base):
     captured_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     value = Column(JSONB, nullable=False)
     source = Column(Text)
+    deleted_at = Column(DateTime(timezone=True))
 
 
 class ItemSnapshot(Base):
@@ -75,3 +80,4 @@ class ItemSnapshot(Base):
     data_text = Column(Text)
     data = Column(JSONB)
     meta = Column(JSONB, nullable=False, server_default="{}")
+    deleted_at = Column(DateTime(timezone=True))

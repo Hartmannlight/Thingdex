@@ -36,16 +36,21 @@ def print_label_for_entity(payload: LabelReprintRequest, db: Session = Depends(g
 
     if payload.item_id:
         item = db.get(Item, payload.item_id)
-        if not item:
+        if not item or item.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Item not found")
         item_type = db.get(ItemType, item.type_id)
-        if not item_type or not item_type.label_template_id:
+        if not item_type or item_type.deleted_at is not None:
+            raise HTTPException(status_code=400, detail="Item type not found")
+        template_id = payload.template_id or item_type.label_template_id
+        if not template_id:
             raise HTTPException(status_code=400, detail="Item type has no label_template_id")
         try:
-            template = fetch_template(item_type.label_template_id)
+            template = fetch_template(template_id)
         except LabelServiceError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-        required_vars = required_template_variables(template)
+        required_vars = [
+            name for name in required_template_variables(template) if name != "internal_uuid"
+        ]
         props = item.props or {}
         missing = [name for name in required_vars if name not in props]
         if missing:
@@ -54,6 +59,7 @@ def print_label_for_entity(payload: LabelReprintRequest, db: Session = Depends(g
                 detail=f"Missing required template variables in props: {', '.join(missing)}",
             )
         variables = build_template_variables(template, props)
+        variables["internal_uuid"] = str(item.id)
         try:
             return print_label(
                 printer_id=payload.printer_id,
@@ -65,11 +71,13 @@ def print_label_for_entity(payload: LabelReprintRequest, db: Session = Depends(g
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     location = db.get(Location, payload.location_id)
-    if not location:
+    if not location or location.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Location not found")
     template_id = None
     if isinstance(location.meta, dict):
         template_id = location.meta.get("label_template_id")
+    if not template_id:
+        template_id = payload.template_id
     if not template_id:
         raise HTTPException(status_code=400, detail="Location has no label_template_id")
     try:
@@ -77,7 +85,11 @@ def print_label_for_entity(payload: LabelReprintRequest, db: Session = Depends(g
     except LabelServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     required_vars = required_template_variables(template)
-    variables = {"uuid": str(location.id), "containername": location.name}
+    variables = {
+        "location_uuid": str(location.id),
+        "container_name": location.name,
+        "internal_uuid": str(location.id),
+    }
     missing = [name for name in required_vars if name not in variables]
     if missing:
         raise HTTPException(
