@@ -81,6 +81,22 @@ class LabelPrintRequest(BaseModel):
     return_preview: bool | None = None
 
 
+class SideEffectResult(BaseModel):
+    requested: bool = False
+    success: bool = False
+    result: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class SideEffects(BaseModel):
+    label_print: SideEffectResult | None = None
+
+
+class LocationCreateResponse(BaseModel):
+    data: LocationOut
+    side_effects: SideEffects = Field(default_factory=SideEffects)
+
+
 class LabelReprintRequest(BaseModel):
     printer_id: str
     template_id: str | None = None
@@ -144,6 +160,11 @@ class ItemOut(ItemBase):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     type_id: UUID
+
+
+class ItemCreateResponse(BaseModel):
+    data: ItemOut
+    side_effects: SideEffects = Field(default_factory=SideEffects)
 
 
 class ItemDetailType(BaseModel):

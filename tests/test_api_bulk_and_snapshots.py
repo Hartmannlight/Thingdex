@@ -56,7 +56,7 @@ def test_bulk_create_update_and_move(client):
     new_location = client.post(
         "/v1/locations",
         json={"name": "Storage", "parent_id": root["id"], "kind": "room"},
-    ).json()
+    ).json()["data"]
     bulk_move = client.patch(
         "/v1/items/bulk/move",
         json={"item_ids": [items[0]["id"], items[1]["id"]], "location_id": new_location["id"]},
@@ -72,7 +72,7 @@ def test_snapshots_create_list_delete(client):
     item = client.post(
         "/v1/items",
         json={"type_id": item_type["id"], "location_id": root["id"], "props": {"serial": "S1"}},
-    ).json()
+    ).json()["data"]
 
     snapshot = client.post(
         f"/v1/items/{item['id']}/snapshots",

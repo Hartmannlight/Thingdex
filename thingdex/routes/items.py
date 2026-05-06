@@ -29,6 +29,7 @@ from thingdex.schemas import (
     ItemBulkMove,
     ItemBulkUpdate,
     ItemCreate,
+    ItemCreateResponse,
     ItemDetailLocation,
     ItemDetailOut,
     ItemDetailType,
@@ -43,6 +44,8 @@ from thingdex.schemas import (
     ItemSnapshotOut,
     ItemUpdate,
     SearchRequest,
+    SideEffectResult,
+    SideEffects,
 )
 from thingdex.validation import SchemaValidationError, track_history_for, validate_props
 
@@ -57,7 +60,7 @@ def get_db():
         db.close()
 
 
-@router.post("", response_model=ItemOut)
+@router.post("", response_model=ItemCreateResponse)
 def create_item(payload: ItemCreate, db: Session = Depends(get_db)):
     """Create an item and validate its props against the item type schema."""
     item_type = resolve_item_type(db, type_name=payload.type, type_id=payload.type_id)
@@ -73,25 +76,9 @@ def create_item(payload: ItemCreate, db: Session = Depends(get_db)):
     except SchemaValidationError as exc:
         raise HTTPException(status_code=400, detail=exc.errors) from exc
 
-    template = None
+    label_print_result = None
     if payload.label_print is not None:
-        if not label_printing_enabled():
-            raise HTTPException(status_code=400, detail="Label printing is disabled")
-        if not item_type.label_template_id:
-            raise HTTPException(status_code=400, detail="Item type has no label_template_id")
-        try:
-            template = fetch_template(item_type.label_template_id)
-        except LabelServiceError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        required_vars = [
-            name for name in required_template_variables(template) if name != "internal_uuid"
-        ]
-        missing = [name for name in required_vars if name not in props]
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Missing required template variables in props: {', '.join(missing)}",
-            )
+        label_print_result = SideEffectResult(requested=True, success=False)
 
     item = Item(
         type_id=item_type.id,
@@ -101,23 +88,46 @@ def create_item(payload: ItemCreate, db: Session = Depends(get_db)):
         props=props,
     )
     db.add(item)
-    if payload.label_print is not None and template is not None:
-        db.flush()
-        variables = build_template_variables(template, props)
-        variables["internal_uuid"] = str(item.id)
-        try:
-            print_label(
-                printer_id=payload.label_print.printer_id,
-                template=template.get("template", {}),
-                variables=variables,
-                return_preview=payload.label_print.return_preview,
-            )
-        except LabelServiceError as exc:
-            db.rollback()
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
     db.commit()
     db.refresh(item)
-    return item
+
+    if payload.label_print is not None and label_print_result is not None:
+        if not label_printing_enabled():
+            label_print_result.error = "Label printing is disabled"
+        elif not item_type.label_template_id:
+            label_print_result.error = "Item type has no label_template_id"
+        else:
+            try:
+                template = fetch_template(item_type.label_template_id)
+                required_vars = [
+                    name for name in required_template_variables(template) if name != "internal_uuid"
+                ]
+                missing = [name for name in required_vars if name not in props]
+                if missing:
+                    label_print_result.error = (
+                        "Missing required template variables in props: "
+                        f"{', '.join(missing)}"
+                    )
+                    return ItemCreateResponse(
+                        data=item,
+                        side_effects=SideEffects(label_print=label_print_result),
+                    )
+                variables = build_template_variables(template, props)
+                variables["internal_uuid"] = str(item.id)
+                print_response = print_label(
+                    printer_id=payload.label_print.printer_id,
+                    template=template.get("template", {}),
+                    variables=variables,
+                    return_preview=payload.label_print.return_preview,
+                )
+                label_print_result.success = True
+                label_print_result.result = print_response
+            except LabelServiceError as exc:
+                label_print_result.error = str(exc)
+    return ItemCreateResponse(
+        data=item,
+        side_effects=SideEffects(label_print=label_print_result),
+    )
 
 
 @router.post("/bulk", response_model=list[ItemOut])

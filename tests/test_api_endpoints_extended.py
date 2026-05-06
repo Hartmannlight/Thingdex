@@ -28,7 +28,7 @@ def _create_item(client, item_type_id, location_id, props, status=None, descript
     }
     response = client.post("/v1/items", json=payload)
     assert response.status_code == 200, response.text
-    return response.json()
+    return response.json()["data"]
 
 
 def _get_root_location(client):
@@ -77,7 +77,7 @@ def test_items_list_update_move_delete_and_missing_location(client):
     alt_location = client.post(
         "/v1/locations",
         json={"name": "Bin", "parent_id": root["id"], "kind": "container"},
-    ).json()
+    ).json()["data"]
     item_type = _create_item_type(client, name="TypeC")
     item = _create_item(
         client,
@@ -200,7 +200,7 @@ def test_locations_update_delete_conflict(client):
     location = client.post(
         "/v1/locations",
         json={"name": "Shelf", "parent_id": root["id"], "kind": "shelf"},
-    ).json()
+    ).json()["data"]
     updated = client.patch(
         f"/v1/locations/{location['id']}",
         json={"name": "Shelf-1", "kind": "container", "meta": {"label": "A"}},

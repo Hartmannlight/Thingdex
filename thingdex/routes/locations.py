@@ -4,7 +4,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from thingdex.crud import ensure_root_location, get_descendant_location_ids, get_location_path
+from thingdex.crud import (
+    ensure_root_location,
+    get_descendant_location_ids,
+    get_location_path,
+    get_root_location as find_root_location,
+)
 from thingdex.db import SessionLocal
 from thingdex.labeling import (
     LabelServiceError,
@@ -17,10 +22,13 @@ from thingdex.models import Item, Location
 from thingdex.schemas import (
     ItemOut,
     LocationCreate,
+    LocationCreateResponse,
     LocationOut,
     LocationPathItem,
     LocationTreeNode,
     LocationUpdate,
+    SideEffectResult,
+    SideEffects,
 )
 
 router = APIRouter(prefix="/v1/locations", tags=["locations"])
@@ -34,11 +42,12 @@ def get_db():
         db.close()
 
 
-@router.post("", response_model=LocationOut)
+@router.post("", response_model=LocationCreateResponse)
 def create_location(payload: LocationCreate, db: Session = Depends(get_db)):
     """Create a new location node in the location tree."""
     if payload.parent_id is None and payload.kind == "root":
-        return ensure_root_location(db, name=payload.name)
+        location = ensure_root_location(db, name=payload.name)
+        return LocationCreateResponse(data=location)
     if payload.parent_id is not None:
         parent = db.get(Location, payload.parent_id)
         if not parent or parent.deleted_at is not None:
@@ -51,37 +60,56 @@ def create_location(payload: LocationCreate, db: Session = Depends(get_db)):
     )
     db.add(location)
     db.commit()
+    db.refresh(location)
+    label_print_result = None
     if payload.label_print is not None:
+        label_print_result = SideEffectResult(requested=True, success=False)
         if not label_printing_enabled():
-            raise HTTPException(status_code=400, detail="Label printing is disabled")
-        template_id = payload.label_print.template_id
-        if not template_id and isinstance(location.meta, dict):
-            template_id = location.meta.get("label_template_id")
-        if not template_id:
-            template_id = container_template_id()
+            label_print_result.error = "Label printing is disabled"
+            return LocationCreateResponse(
+                data=location,
+                side_effects=SideEffects(label_print=label_print_result),
+            )
         try:
+            template_id = payload.label_print.template_id
+            if not template_id and isinstance(location.meta, dict):
+                template_id = location.meta.get("label_template_id")
+            if not template_id:
+                template_id = container_template_id()
             template = fetch_template(template_id)
             variables = {
                 "location_uuid": str(location.id),
                 "container_name": location.name,
                 "internal_uuid": str(location.id),
             }
-            print_label(
+            print_response = print_label(
                 printer_id=payload.label_print.printer_id,
                 template=template.get("template", {}),
                 variables=variables,
                 return_preview=payload.label_print.return_preview,
             )
+            label_print_result.success = True
+            label_print_result.result = print_response
         except LabelServiceError as exc:
-            db.rollback()
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-    db.refresh(location)
-    return location
+            label_print_result.error = str(exc)
+    return LocationCreateResponse(
+        data=location,
+        side_effects=SideEffects(label_print=label_print_result),
+    )
 
 
 @router.get("/root", response_model=LocationOut)
 def get_root_location(db: Session = Depends(get_db)):
-    """Fetch or create the unique root location."""
+    """Fetch the unique root location."""
+    root = find_root_location(db)
+    if root is None:
+        raise HTTPException(status_code=404, detail="Root location not found")
+    return root
+
+
+@router.post("/root/bootstrap", response_model=LocationOut)
+def bootstrap_root_location(db: Session = Depends(get_db)):
+    """Create the unique root location if it does not exist."""
     return ensure_root_location(db)
 
 

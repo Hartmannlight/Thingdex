@@ -47,7 +47,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LocationOut"
+                  "$ref": "#/components/schemas/LocationCreateResponse"
                 }
               }
             }
@@ -71,8 +71,30 @@
           "locations"
         ],
         "summary": "Get Root Location",
-        "description": "Fetch or create the unique root location.",
+        "description": "Fetch the unique root location.",
         "operationId": "get_root_location_v1_locations_root_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/locations/root/bootstrap": {
+      "post": {
+        "tags": [
+          "locations"
+        ],
+        "summary": "Bootstrap Root Location",
+        "description": "Create the unique root location if it does not exist.",
+        "operationId": "bootstrap_root_location_v1_locations_root_bootstrap_post",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -783,7 +805,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ItemOut"
+                  "$ref": "#/components/schemas/ItemCreateResponse"
                 }
               }
             }
@@ -2440,6 +2462,21 @@
         "type": "object",
         "title": "ItemCreate"
       },
+      "ItemCreateResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ItemOut"
+          },
+          "side_effects": {
+            "$ref": "#/components/schemas/SideEffects"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "ItemCreateResponse"
+      },
       "ItemDetailLocation": {
         "properties": {
           "physical_location_id": {
@@ -3394,6 +3431,21 @@
         ],
         "title": "LocationCreate"
       },
+      "LocationCreateResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/LocationOut"
+          },
+          "side_effects": {
+            "$ref": "#/components/schemas/SideEffects"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "LocationCreateResponse"
+      },
       "LocationOut": {
         "properties": {
           "name": {
@@ -3683,6 +3735,61 @@
         "type": "object",
         "title": "SearchRequest"
       },
+      "SideEffectResult": {
+        "properties": {
+          "requested": {
+            "type": "boolean",
+            "title": "Requested",
+            "default": false
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": false
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "title": "SideEffectResult"
+      },
+      "SideEffects": {
+        "properties": {
+          "label_print": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SideEffectResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "SideEffects"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -3706,6 +3813,13 @@
           "type": {
             "type": "string",
             "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
           }
         },
         "type": "object",

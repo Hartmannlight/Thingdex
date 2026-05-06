@@ -23,7 +23,7 @@ def _create_item(client, item_type_id, location_id, props):
     }
     response = client.post("/v1/items", json=payload)
     assert response.status_code == 200, response.text
-    return response.json()
+    return response.json()["data"]
 
 
 def _get_root_location(client):
@@ -40,6 +40,18 @@ def test_health_check_reports_root(client):
     assert data["root_location_id"]
 
 
+def test_root_location_bootstrap_endpoint_is_idempotent(client):
+    root = _get_root_location(client)
+
+    bootstrapped = client.post("/v1/locations/root/bootstrap")
+    assert bootstrapped.status_code == 200, bootstrapped.text
+    assert bootstrapped.json()["id"] == root["id"]
+
+    fetched = client.get("/v1/locations/root")
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["id"] == root["id"]
+
+
 def test_locations_tree_and_path(client):
     root = _get_root_location(client)
     response = client.post(
@@ -47,7 +59,7 @@ def test_locations_tree_and_path(client):
         json={"name": "Garage", "parent_id": root["id"], "kind": "room"},
     )
     assert response.status_code == 200, response.text
-    child = response.json()
+    child = response.json()["data"]
 
     path_response = client.get(f"/v1/locations/{child['id']}/path")
     assert path_response.status_code == 200, path_response.text
