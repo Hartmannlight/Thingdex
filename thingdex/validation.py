@@ -12,6 +12,56 @@ class SchemaValidationError(Exception):
         return "; ".join(self.errors)
 
 
+SUPPORTED_FIELD_TYPES = {"string", "integer", "number", "boolean", "date", "date-time"}
+
+
+def validate_item_type_schema(schema: dict[str, Any]) -> None:
+    """Validate the project-specific item type schema before persisting it."""
+    errors: list[str] = []
+    fields = schema.get("fields", {})
+    if not isinstance(fields, dict):
+        raise SchemaValidationError(["fields: expected object"])
+    if "allow_additional" in schema and not isinstance(schema["allow_additional"], bool):
+        errors.append("allow_additional: expected boolean")
+
+    for key, definition in fields.items():
+        if not isinstance(key, str) or not key:
+            errors.append("fields: field names must be non-empty strings")
+            continue
+        if not isinstance(definition, dict):
+            errors.append(f"{key}: expected field definition object")
+            continue
+        field_type = definition.get("type")
+        if field_type not in SUPPORTED_FIELD_TYPES:
+            errors.append(f"{key}: unsupported type '{field_type}'")
+        for flag in ("required", "track_history"):
+            if flag in definition and not isinstance(definition[flag], bool):
+                errors.append(f"{key}.{flag}: expected boolean")
+        if "enum" in definition and not isinstance(definition["enum"], list):
+            errors.append(f"{key}.enum: expected array")
+        for bound in ("min", "max"):
+            value = definition.get(bound)
+            if value is not None and not _is_number(value):
+                errors.append(f"{key}.{bound}: expected number")
+        if "pattern" in definition:
+            pattern = definition["pattern"]
+            if not isinstance(pattern, str):
+                errors.append(f"{key}.pattern: expected string")
+            else:
+                try:
+                    re.compile(pattern)
+                except re.error:
+                    errors.append(f"{key}.pattern: invalid regular expression")
+        if "default" in definition:
+            try:
+                errors.extend(_validate_field(key, definition, definition["default"]))
+            except (TypeError, re.error):
+                errors.append(f"{key}.default: cannot be validated against field constraints")
+
+    if errors:
+        raise SchemaValidationError(errors)
+
+
 def _is_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 

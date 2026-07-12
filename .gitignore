@@ -23,10 +23,12 @@ venv/
 build/
 dist/
 *.egg-info/
+site/
 
 # Environment files
 .env
 .env.*
+!.env.example
 
 # OS files
 .DS_Store

@@ -11,8 +11,10 @@ from thingdex.crud import (
     build_props_filter,
     get_descendant_location_ids,
     is_item_in_use,
+    lock_in_use_relation_graph,
     resolve_effective_location,
     resolve_item_type,
+    would_create_in_use_cycle,
 )
 from thingdex.db import SessionLocal
 from thingdex.labeling import (
@@ -23,7 +25,7 @@ from thingdex.labeling import (
     print_label,
     required_template_variables,
 )
-from thingdex.models import Item, ItemPropHistory, ItemRelation, ItemSnapshot, ItemType, Location
+from thingdex.models import Item, ItemPropHistory, ItemRelation, ItemSnapshot, ItemType, LabelProfile, Location
 from thingdex.schemas import (
     ItemBulkCreate,
     ItemBulkMove,
@@ -44,6 +46,7 @@ from thingdex.schemas import (
     ItemSnapshotOut,
     ItemUpdate,
     SearchRequest,
+    LabelPrintRequest,
     SideEffectResult,
     SideEffects,
 )
@@ -76,8 +79,27 @@ def create_item(payload: ItemCreate, db: Session = Depends(get_db)):
     except SchemaValidationError as exc:
         raise HTTPException(status_code=400, detail=exc.errors) from exc
 
+    profile = (
+        db.query(LabelProfile)
+        .filter(
+            LabelProfile.entity_kind == "item",
+            LabelProfile.item_type_id == item_type.id,
+            LabelProfile.enabled.is_(True),
+            LabelProfile.auto_print.is_(True),
+        )
+        .one_or_none()
+    )
+    label_request = payload.label_print
+    profile_bindings: dict[str, str] = {}
+    if label_request is None and profile is not None:
+        label_request = LabelPrintRequest(
+            printer_id=profile.printer_id,
+            template_id=profile.template_id,
+        )
+        profile_bindings = dict(profile.bindings or {})
+
     label_print_result = None
-    if payload.label_print is not None:
+    if label_request is not None:
         label_print_result = SideEffectResult(requested=True, success=False)
 
     item = Item(
@@ -91,34 +113,50 @@ def create_item(payload: ItemCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(item)
 
-    if payload.label_print is not None and label_print_result is not None:
+    if label_request is not None and label_print_result is not None:
+        template_id = label_request.template_id or item_type.label_template_id
         if not label_printing_enabled():
             label_print_result.error = "Label printing is disabled"
-        elif not item_type.label_template_id:
+        if not label_print_result.error and not template_id:
             label_print_result.error = "Item type has no label_template_id"
-        else:
+        elif not label_print_result.error:
             try:
-                template = fetch_template(item_type.label_template_id)
-                required_vars = [
-                    name for name in required_template_variables(template) if name != "internal_uuid"
-                ]
-                missing = [name for name in required_vars if name not in props]
+                template = fetch_template(template_id)
+                variables = build_template_variables(
+                    template,
+                    props,
+                    context={
+                        "entity": {
+                            "id": str(item.id),
+                            "display_name": item.description or item_type.name,
+                            "description": item.description or "",
+                            "status": item.status,
+                        },
+                        "item": {"id": str(item.id), "type": item_type.name},
+                        "location": {"id": str(location.id), "name": location.name},
+                    },
+                    bindings=profile_bindings,
+                )
+                required_vars = [name for name in required_template_variables(template) if name != "internal_uuid"]
+                missing = [name for name in required_vars if name not in variables]
                 if missing:
                     label_print_result.error = (
-                        "Missing required template variables in props: "
+                        "Missing required template variables: "
                         f"{', '.join(missing)}"
                     )
                     return ItemCreateResponse(
                         data=item,
                         side_effects=SideEffects(label_print=label_print_result),
                     )
-                variables = build_template_variables(template, props)
                 variables["internal_uuid"] = str(item.id)
                 print_response = print_label(
-                    printer_id=payload.label_print.printer_id,
+                    printer_id=label_request.printer_id,
                     template=template.get("template", {}),
                     variables=variables,
-                    return_preview=payload.label_print.return_preview,
+                    return_preview=label_request.return_preview,
+                    template_id=template_id,
+                    idempotency_key=f"thingdex:item:{item.id}:create",
+                    origin="thingdex",
                 )
                 label_print_result.success = True
                 label_print_result.result = print_response
@@ -479,8 +517,16 @@ def create_relation(item_id: UUID, payload: ItemRelationCreate, db: Session = De
         raise HTTPException(status_code=404, detail="Child item not found")
     if item_id == payload.child_item_id:
         raise HTTPException(status_code=400, detail="Parent and child cannot be the same item")
-    if payload.relation_type in IN_USE_RELATION_TYPES and is_item_in_use(db, payload.child_item_id):
-        raise HTTPException(status_code=409, detail="Child item is already in use")
+    if payload.relation_type in IN_USE_RELATION_TYPES:
+        lock_in_use_relation_graph(db)
+        if is_item_in_use(db, payload.child_item_id):
+            raise HTTPException(status_code=409, detail="Child item is already in use")
+        if would_create_in_use_cycle(
+            db,
+            parent_item_id=item_id,
+            child_item_id=payload.child_item_id,
+        ):
+            raise HTTPException(status_code=409, detail="Relation would create an in-use cycle")
 
     relation = ItemRelation(
         parent_item_id=item_id,

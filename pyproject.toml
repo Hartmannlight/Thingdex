@@ -1,7 +1,7 @@
 [project]
 name = "thingdex"
 version = "0.1.0"
-description = ""
+description = "Backend API and source of truth for the Thingdex household inventory"
 authors = [
     {name = "Nathaniel Hartmann",email = "nathaniel.hartmann@partner.kit.edu"}
 ]
@@ -20,6 +20,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+]
+docs = [
+    "mkdocs-material>=9,<10",
 ]
 
 [tool.pytest.ini_options]

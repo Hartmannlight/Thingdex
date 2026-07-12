@@ -81,11 +81,61 @@ class LabelPrintRequest(BaseModel):
     return_preview: bool | None = None
 
 
+class LabelPrintResult(BaseModel):
+    """Result returned after PrintHub accepted and sent a synchronous print."""
+
+    status: Literal["sent", "queued"] = "sent"
+    printer_id: str
+    bytes_sent: int = Field(ge=0)
+    preview_png_base64: str | None = None
+    job_id: str | None = None
+    job_state: str | None = None
+
+
+class LabelProfileBase(BaseModel):
+    name: str
+    entity_kind: Literal["item", "location"]
+    item_type_id: UUID | None = None
+    location_kind: str | None = None
+    template_id: str
+    printer_id: str
+    auto_print: bool = True
+    bindings: dict[str, str] = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class LabelProfileCreate(LabelProfileBase):
+    pass
+
+
+class LabelProfileUpdate(BaseModel):
+    name: str | None = None
+    template_id: str | None = None
+    printer_id: str | None = None
+    auto_print: bool | None = None
+    bindings: dict[str, str] | None = None
+    enabled: bool | None = None
+
+
+class LabelProfileOut(LabelProfileBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
 class SideEffectResult(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     requested: bool = False
     success: bool = False
-    result: dict[str, Any] | None = None
+    result: LabelPrintResult | None = None
     error: str | None = None
+
+
+class HealthResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    root_location_id: UUID | None = None
 
 
 class SideEffects(BaseModel):
@@ -186,14 +236,15 @@ class ItemDetailOut(ItemOut):
 class ItemRelationCreate(BaseModel):
     child_item_id: UUID
     relation_type: Literal["installed_in", "uses", "paired_with"]
-    quantity: int | None = None
+    quantity: int | None = Field(default=None, ge=1)
     slot: str | None = None
     notes: str | None = None
 
 
 class ItemRelationUpdate(BaseModel):
-    active: bool | None = None
-    quantity: int | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    quantity: int | None = Field(default=None, ge=1)
     slot: str | None = None
     notes: str | None = None
 

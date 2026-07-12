@@ -1,0 +1,56 @@
+site_name: Thingdex Backend
+site_description: Backend API and data model for the Thingdex household inventory
+site_url: https://hartmannlight.github.io/Thingdex/
+repo_url: https://github.com/Hartmannlight/Thingdex
+repo_name: Hartmannlight/Thingdex
+edit_uri: edit/main/docs/
+strict: true
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.indexes
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+
+nav:
+  - Overview: index.md
+  - Getting started: getting-started.md
+  - Concepts: concepts.md
+  - Architecture: architecture.md
+  - API: api.md
+  - Configuration: configuration.md
+  - Deployment: deployment.md
+  - Development: development.md
+  - Integrations: integrations.md
+  - Reference:
+      - Item type schema: reference/item-type-schema.md
+      - Data model: reference/data-model.md

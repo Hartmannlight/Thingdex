@@ -72,6 +72,38 @@ def test_item_type_delete_conflict_when_items_exist(client):
     assert deleted.status_code == 409, deleted.text
 
 
+def test_item_type_schema_change_cannot_invalidate_existing_items(client):
+    root = _get_root_location(client)
+    item_type = _create_item_type(client, name="SchemaStable")
+    _create_item(client, item_type["id"], root["id"], {"serial": "S-1", "rating": 1.0})
+
+    incompatible_schema = {
+        "fields": {
+            "serial": {"type": "integer", "required": True},
+            "rating": {"type": "number"},
+        },
+        "allow_additional": False,
+    }
+    response = client.patch(
+        f"/v1/item-types/{item_type['id']}",
+        json={"schema": incompatible_schema},
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["message"] == "Schema change would invalidate existing items"
+
+    unchanged = client.get(f"/v1/item-types/{item_type['id']}").json()
+    assert unchanged["schema"]["fields"]["serial"]["type"] == "string"
+
+
+def test_item_type_schema_definition_is_validated(client):
+    response = client.post(
+        "/v1/item-types",
+        json={"name": "BrokenSchema", "schema": {"fields": []}},
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == ["fields: expected object"]
+
+
 def test_items_list_update_move_delete_and_missing_location(client):
     root = _get_root_location(client)
     alt_location = client.post(

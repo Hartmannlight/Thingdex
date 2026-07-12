@@ -13,14 +13,17 @@ from thingdex.crud import (
 from thingdex.db import SessionLocal
 from thingdex.labeling import (
     LabelServiceError,
+    build_template_variables,
     container_template_id,
     fetch_template,
     label_printing_enabled,
     print_label,
+    required_template_variables,
 )
-from thingdex.models import Item, Location
+from thingdex.models import Item, LabelProfile, Location
 from thingdex.schemas import (
     ItemOut,
+    LabelPrintRequest,
     LocationCreate,
     LocationCreateResponse,
     LocationOut,
@@ -48,10 +51,34 @@ def create_location(payload: LocationCreate, db: Session = Depends(get_db)):
     if payload.parent_id is None and payload.kind == "root":
         location = ensure_root_location(db, name=payload.name)
         return LocationCreateResponse(data=location)
-    if payload.parent_id is not None:
-        parent = db.get(Location, payload.parent_id)
-        if not parent or parent.deleted_at is not None:
-            raise HTTPException(status_code=400, detail="Parent location not found")
+    if payload.parent_id is None:
+        raise HTTPException(status_code=400, detail="parent_id is required for non-root locations")
+    if payload.kind == "root":
+        raise HTTPException(status_code=400, detail="Root location cannot have a parent")
+    parent = db.get(Location, payload.parent_id)
+    if not parent or parent.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="Parent location not found")
+
+    profile = (
+        db.query(LabelProfile)
+        .filter(
+            LabelProfile.entity_kind == "location",
+            LabelProfile.location_kind.in_([payload.kind, "*"]),
+            LabelProfile.enabled.is_(True),
+            LabelProfile.auto_print.is_(True),
+        )
+        .order_by(LabelProfile.location_kind.desc())
+        .first()
+    )
+    label_request = payload.label_print
+    profile_bindings: dict[str, str] = {}
+    if label_request is None and profile is not None:
+        label_request = LabelPrintRequest(
+            printer_id=profile.printer_id,
+            template_id=profile.template_id,
+        )
+        profile_bindings = dict(profile.bindings or {})
+
     location = Location(
         name=payload.name,
         parent_id=payload.parent_id,
@@ -62,7 +89,7 @@ def create_location(payload: LocationCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(location)
     label_print_result = None
-    if payload.label_print is not None:
+    if label_request is not None:
         label_print_result = SideEffectResult(requested=True, success=False)
         if not label_printing_enabled():
             label_print_result.error = "Label printing is disabled"
@@ -71,22 +98,53 @@ def create_location(payload: LocationCreate, db: Session = Depends(get_db)):
                 side_effects=SideEffects(label_print=label_print_result),
             )
         try:
-            template_id = payload.label_print.template_id
+            template_id = label_request.template_id
             if not template_id and isinstance(location.meta, dict):
                 template_id = location.meta.get("label_template_id")
             if not template_id:
                 template_id = container_template_id()
             template = fetch_template(template_id)
-            variables = {
+            base_variables = {
                 "location_uuid": str(location.id),
                 "container_name": location.name,
                 "internal_uuid": str(location.id),
             }
+            variables = build_template_variables(
+                template,
+                location.meta or {},
+                context={
+                    "entity": {
+                        "id": str(location.id),
+                        "display_name": location.name,
+                    },
+                    "location": {
+                        "id": str(location.id),
+                        "name": location.name,
+                        "kind": location.kind,
+                        "meta": location.meta or {},
+                    },
+                },
+                bindings=profile_bindings,
+            )
+            variables.update(base_variables)
+            missing = [name for name in required_template_variables(template) if name not in variables]
+            if missing:
+                label_print_result.error = (
+                    "Missing required template variables: "
+                    f"{', '.join(missing)}"
+                )
+                return LocationCreateResponse(
+                    data=location,
+                    side_effects=SideEffects(label_print=label_print_result),
+                )
             print_response = print_label(
-                printer_id=payload.label_print.printer_id,
+                printer_id=label_request.printer_id,
                 template=template.get("template", {}),
                 variables=variables,
-                return_preview=payload.label_print.return_preview,
+                return_preview=label_request.return_preview,
+                template_id=template_id,
+                idempotency_key=f"thingdex:location:{location.id}:create",
+                origin="thingdex",
             )
             label_print_result.success = True
             label_print_result.result = print_response
@@ -169,7 +227,19 @@ def update_location(location_id: UUID, payload: LocationUpdate, db: Session = De
     location = db.get(Location, location_id)
     if not location or location.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Location not found")
-    if payload.parent_id is not None:
+    is_root = location.parent_id is None and location.kind == "root"
+    changed_fields = payload.model_fields_set
+    if is_root:
+        if "parent_id" in changed_fields:
+            raise HTTPException(status_code=400, detail="Root location cannot be moved")
+        if "kind" in changed_fields and payload.kind != "root":
+            raise HTTPException(status_code=400, detail="Root location kind cannot be changed")
+    elif "kind" in changed_fields and payload.kind == "root":
+        raise HTTPException(status_code=400, detail="Only the root location can use kind 'root'")
+
+    if "parent_id" in changed_fields:
+        if payload.parent_id is None:
+            raise HTTPException(status_code=400, detail="Non-root locations require a parent")
         if payload.parent_id == location_id:
             raise HTTPException(status_code=400, detail="Location cannot be its own parent")
         parent = db.get(Location, payload.parent_id)

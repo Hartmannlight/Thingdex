@@ -1,32 +1,68 @@
 # Thingdex
 
-Backend API for the household inventory system described in `project-idea.md`.
+Thingdex is the backend and source of truth for a self-hosted household
+inventory. It stores physical locations, user-defined item types, inventory
+items, tracked property history, snapshots, and relations between items such
+as installed or used components.
 
-## Quick Start (Local API + Docker Postgres)
-1. Start Postgres:
-   `docker compose up -d`
-2. Install dependencies:
-   `poetry install`
-3. Run migrations:
-   `poetry run alembic upgrade head`
-4. Start the API:
-   `poetry run uvicorn thingdex.main:app --reload`
+This repository contains only the backend service. User interfaces, generated
+SDKs, label tooling, and deployment orchestration live in separate repositories.
 
-The API listens on `http://127.0.0.1:8000` and exposes OpenAPI docs at `/docs`.
+## What it provides
 
-## Testing
-- Ensure Postgres is running (see Quick Start step 1).
-- Optional: override the test database URL with `THINGDEX_TEST_DATABASE_URL`.
-- Run: `poetry run pytest`
+- A versioned FastAPI REST API with an exported OpenAPI contract.
+- Nested physical locations with one protected root location.
+- Schema-driven item types backed by flexible PostgreSQL JSONB properties.
+- Atomic attach/detach workflows and effective-location resolution for parts.
+- Optional property history, large snapshots, search, and label printing.
+- Alembic migrations, health endpoints, a production container, and tests.
 
-## Configuration
-- `DATABASE_URL` (default: `postgresql+psycopg://thingdex:thingdex@localhost:5432/thingdex`)
-- `ROOT_LOCATION_NAME` (default: `World`)
-- `LABEL_PRINTING_ENABLED` (default: `false`)
-- `LABEL_API_BASE` (default: `http://label.xn--jahnstrae-n1a.de/api/v1`)
-- `PRINTHUB_API_BASE` (default: `http://printhub.xn--jahnstrae-n1a.de`)
-- `LABEL_CONTAINER_TEMPLATE_ID` (default: `container-name`)
+## Documentation
 
-## API Documentation Export
-- Generate a portable OpenAPI spec: `poetry run python scripts/export_openapi.py`
-- See additional notes in `api-doc.md`
+The complete documentation lives in [`docs/`](docs/index.md) and is built with
+[Material for MkDocs](https://squidfunk.github.io/mkdocs-material/).
+
+```shell
+poetry install --all-extras
+poetry run mkdocs serve
+```
+
+Build the same strict static site used by CI:
+
+```shell
+poetry run mkdocs build --strict
+```
+
+Start with the [getting-started guide](docs/getting-started.md), review all
+[configuration variables](docs/configuration.md), or read the
+[architecture](docs/architecture.md).
+
+## Quick development start
+
+Thingdex requires Python 3.13+ and PostgreSQL 15+.
+
+```shell
+poetry install --all-extras
+poetry run alembic upgrade head
+poetry run uvicorn thingdex.main:app --reload
+```
+
+Set `DATABASE_URL` before migrating when PostgreSQL is not available at the
+local default. The interactive API is exposed at `http://127.0.0.1:8000/docs`.
+
+```shell
+poetry run pytest
+poetry run alembic check
+poetry run python scripts/check_openapi.py
+```
+
+## Related repositories
+
+- [Thingdex Home Inventory](https://github.com/Hartmannlight/Thingdex-Home-Inventory) — system-level documentation and deployment
+- [ThingdexUI](https://github.com/Hartmannlight/ThingdexUI) — browser UI
+- [thingdex-sdk](https://github.com/Hartmannlight/thingdex-sdk) — generated TypeScript client
+- [PrintHub-ZPL-II](https://github.com/Hartmannlight/PrintHub-ZPL-ll) — label rendering and printer gateway
+
+## License
+
+No license has been published for this repository yet.

@@ -1,29 +1,32 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-- Current repository is a project specification, not an implementation. Key files:
-  - `pyproject.toml`: Python project metadata (requires Python >= 3.13).
-  - `project-idea.md`: Architecture and API design notes.
-- Tests live in `tests/` and should continue to follow `test_*.py` naming.
+## Scope
 
-## Build, Test, and Development Commands
-- Dependency management is configured for Poetry via `pyproject.toml`.
-  - Example: `poetry install` to create the environment once dependencies are defined.
-- Run the test suite with: `poetry run pytest`
+This repository owns the Thingdex FastAPI backend, its PostgreSQL schema,
+Alembic migrations, OpenAPI contract, production image, and backend
+documentation. UI, SDK generation, label services, and multi-service
+orchestration belong to their respective repositories.
 
-## Coding Style & Naming Conventions
-- No formatter or linter is configured yet.
-- Until tooling is added, use 4-space indentation, type hints where reasonable, and snake_case for Python identifiers. Keep module names short and descriptive (e.g., `inventory_service.py`, `locations_api.py`).
+## Development
 
-## Testing Guidelines
-- Tests use pytest and live under `tests/` with `test_*.py` naming.
-- Default database for tests comes from `THINGDEX_TEST_DATABASE_URL` or `DATABASE_URL`.
+- Install all tooling with `poetry install --all-extras`.
+- Run tests with `poetry run pytest` against PostgreSQL.
+- Verify migrations with `poetry run alembic check`.
+- Verify the API contract with `poetry run python scripts/check_openapi.py`.
+- Build documentation with `poetry run mkdocs build --strict`.
 
-## Commit & Pull Request Guidelines
-- Git history is not available in this workspace, so commit conventions cannot be inferred.
-- Use clear, imperative commit subjects (e.g., "Add locations API schema") and include context in the body for non-trivial changes.
-- For pull requests, include a short summary, mention any related issue IDs, and note manual testing steps.
+## Structure
 
-## Architecture Notes
-- The intended stack and data model are described in `project-idea.md`.
-- If implementation diverges from the design, update `project-idea.md` or add a concise `ARCHITECTURE.md` to keep expectations aligned.
+- `thingdex/`: application code and API routes.
+- `alembic/`: database migrations.
+- `tests/`: PostgreSQL-backed integration tests.
+- `docs/`: canonical human-readable documentation.
+- `openapi.json`: committed machine-readable API contract.
+
+## Change rules
+
+- Preserve the root-location, relation-graph, and schema-compatibility invariants.
+- Add a migration for every persistent schema change.
+- Add regression tests for behavior changes.
+- Regenerate `openapi.json` after API contract changes.
+- Update the relevant page under `docs/`; do not add standalone root-level design notes.

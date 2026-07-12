@@ -4,7 +4,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from thingdex.crud import IN_USE_RELATION_TYPES, ensure_root_location, is_item_in_use
+from thingdex.crud import (
+    IN_USE_RELATION_TYPES,
+    ensure_root_location,
+    is_item_in_use,
+    lock_in_use_relation_graph,
+)
 from thingdex.db import SessionLocal
 from thingdex.models import Item, ItemRelation, Location
 from thingdex.schemas import ItemRelationDetach, ItemRelationOut, ItemRelationUpdate
@@ -22,22 +27,18 @@ def get_db():
 
 @router.patch("/{relation_id}", response_model=ItemRelationOut)
 def update_relation(relation_id: UUID, payload: ItemRelationUpdate, db: Session = Depends(get_db)):
-    """Update relation fields (active/quantity/slot/notes)."""
+    """Update relation metadata. Attach/detach endpoints own active state changes."""
     relation = db.get(ItemRelation, relation_id)
     if not relation or relation.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Relation not found")
     if (
-        payload.active is None
-        and payload.quantity is None
+        payload.quantity is None
         and payload.slot is None
         and payload.notes is None
     ):
         raise HTTPException(status_code=400, detail="No fields to update")
 
     changed = False
-    if payload.active is not None and relation.active != payload.active:
-        relation.active = payload.active
-        changed = True
     if payload.quantity is not None and relation.quantity != payload.quantity:
         relation.quantity = payload.quantity
         changed = True
@@ -69,6 +70,8 @@ def detach_relation(relation_id: UUID, payload: ItemRelationDetach, db: Session 
         raise HTTPException(status_code=404, detail="Relation not found")
     if not relation.active:
         return relation
+    if relation.relation_type in IN_USE_RELATION_TYPES:
+        lock_in_use_relation_graph(db)
     relation.active = False
 
     child = db.get(Item, relation.child_item_id)

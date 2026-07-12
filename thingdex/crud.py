@@ -5,13 +5,14 @@ import os
 from typing import Any, Iterable
 from uuid import UUID
 
-from sqlalchemy import Date, DateTime, Numeric, cast, exists, select
+from sqlalchemy import Date, DateTime, Numeric, cast, exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from thingdex.models import Item, ItemRelation, ItemType, Location
 
 IN_USE_RELATION_TYPES = {"installed_in", "uses"}
+IN_USE_RELATION_GRAPH_LOCK = 0x5448494E474458
 
 
 def get_location_path(db: Session, location_id: UUID) -> list[dict[str, Any]]:
@@ -170,6 +171,38 @@ def is_item_in_use(db: Session, item_id: UUID) -> bool:
                 ItemRelation.deleted_at.is_(None),
             )
         )
+        .first()
+        is not None
+    )
+
+
+def lock_in_use_relation_graph(db: Session) -> None:
+    """Serialize graph changes so concurrent requests cannot violate invariants."""
+    db.execute(select(func.pg_advisory_xact_lock(IN_USE_RELATION_GRAPH_LOCK)))
+
+
+def would_create_in_use_cycle(db: Session, *, parent_item_id: UUID, child_item_id: UUID) -> bool:
+    """Return whether adding parent -> child would close an active in-use cycle."""
+    descendants = (
+        select(ItemRelation.child_item_id.label("item_id"))
+        .where(
+            ItemRelation.parent_item_id == child_item_id,
+            ItemRelation.active.is_(True),
+            ItemRelation.relation_type.in_(IN_USE_RELATION_TYPES),
+            ItemRelation.deleted_at.is_(None),
+        )
+        .cte("in_use_descendants", recursive=True)
+    )
+    descendants = descendants.union(
+        select(ItemRelation.child_item_id.label("item_id")).where(
+            ItemRelation.parent_item_id == descendants.c.item_id,
+            ItemRelation.active.is_(True),
+            ItemRelation.relation_type.in_(IN_USE_RELATION_TYPES),
+            ItemRelation.deleted_at.is_(None),
+        )
+    )
+    return (
+        db.execute(select(descendants.c.item_id).where(descendants.c.item_id == parent_item_id))
         .first()
         is not None
     )

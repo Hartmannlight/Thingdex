@@ -1,0 +1,41 @@
+name: Backend CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: thingdex
+          POSTGRES_PASSWORD: thingdex
+          POSTGRES_DB: thingdex_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U thingdex -d thingdex_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      THINGDEX_TEST_DATABASE_URL: postgresql+psycopg://thingdex:thingdex@localhost:5432/thingdex_test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pipx install poetry
+      - run: poetry install --all-extras
+      - run: poetry run alembic upgrade head
+      - run: poetry run alembic check
+      - run: poetry run python scripts/check_openapi.py
+      - run: poetry run pytest
+      - run: poetry run mkdocs build --strict

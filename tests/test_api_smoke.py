@@ -40,6 +40,20 @@ def test_health_check_reports_root(client):
     assert data["root_location_id"]
 
 
+def test_readiness_fails_closed_when_database_is_unavailable(client, monkeypatch):
+    from thingdex import main
+
+    def unavailable_session():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(main, "SessionLocal", unavailable_session)
+
+    assert client.get("/health/live").status_code == 200
+    readiness = client.get("/health/ready")
+    assert readiness.status_code == 503, readiness.text
+    assert readiness.json()["detail"] == "Database unavailable"
+
+
 def test_root_location_bootstrap_endpoint_is_idempotent(client):
     root = _get_root_location(client)
 
@@ -76,6 +90,26 @@ def test_locations_tree_and_path(client):
     tree = tree_response.json()
     assert tree["id"] == root["id"]
     assert any(node["id"] == child["id"] for node in tree["children"])
+
+
+def test_location_root_invariants(client):
+    root = _get_root_location(client)
+
+    orphan = client.post("/v1/locations", json={"name": "Disconnected", "kind": "room"})
+    assert orphan.status_code == 400, orphan.text
+
+    root_kind = client.patch(f"/v1/locations/{root['id']}", json={"kind": "room"})
+    assert root_kind.status_code == 400, root_kind.text
+
+    child = client.post(
+        "/v1/locations",
+        json={"name": "Room", "parent_id": root["id"], "kind": "room"},
+    ).json()["data"]
+    move_root = client.patch(f"/v1/locations/{root['id']}", json={"parent_id": child["id"]})
+    assert move_root.status_code == 400, move_root.text
+
+    promote_child = client.patch(f"/v1/locations/{child['id']}", json={"kind": "root"})
+    assert promote_child.status_code == 400, promote_child.text
 
 
 def test_item_type_item_and_history(client):
@@ -159,3 +193,39 @@ def test_relations_detach_and_delete(client):
 
     delete_item = client.delete(f"/v1/items/{child['id']}")
     assert delete_item.status_code == 204, delete_item.text
+
+
+def test_in_use_relations_reject_direct_state_changes_and_cycles(client):
+    root = _get_root_location(client)
+    item_type = _create_item_type(client, name="RelationInvariant")
+    first = _create_item(
+        client,
+        item_type_id=item_type["id"],
+        location_id=root["id"],
+        props={"serial": "FIRST", "rating": 1.0},
+    )
+    second = _create_item(
+        client,
+        item_type_id=item_type["id"],
+        location_id=root["id"],
+        props={"serial": "SECOND", "rating": 1.0},
+    )
+
+    attached = client.post(
+        f"/v1/items/{first['id']}/relations",
+        json={"child_item_id": second["id"], "relation_type": "installed_in"},
+    )
+    assert attached.status_code == 200, attached.text
+
+    direct_deactivate = client.patch(
+        f"/v1/relations/{attached.json()['id']}",
+        json={"active": False},
+    )
+    assert direct_deactivate.status_code == 422, direct_deactivate.text
+
+    cycle = client.post(
+        f"/v1/items/{second['id']}/relations",
+        json={"child_item_id": first["id"], "relation_type": "uses"},
+    )
+    assert cycle.status_code == 409, cycle.text
+    assert cycle.json()["detail"] == "Relation would create an in-use cycle"

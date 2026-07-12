@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import OperationalError
 
-DEFAULT_DATABASE_URL = "postgresql+psycopg://thingdex:thingdex@localhost:5432/thingdex"
+DEFAULT_DATABASE_URL = "postgresql+psycopg://thingdex:thingdex@127.0.0.1:5432/thingdex"
 
 
 def _base_database_url() -> str:

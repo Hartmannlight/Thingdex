@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 
 
 def _default_database_url() -> str:
-    return "postgresql+psycopg://thingdex:thingdex@localhost:5432/thingdex"
+    return "postgresql+psycopg://thingdex:thingdex@127.0.0.1:5432/thingdex"
 
 
 DATABASE_URL = os.getenv("DATABASE_URL", _default_database_url())
