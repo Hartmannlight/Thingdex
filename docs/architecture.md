@@ -1,5 +1,10 @@
 # Architecture
 
+The production container uses an immutable multi-architecture Python base
+digest. Backend CI likewise pins its PostgreSQL service image and third-party
+Actions, and uses a fixed Poetry version so validation does not drift between
+commits.
+
 ## Technology stack
 
 | Layer | Technology | Responsibility |

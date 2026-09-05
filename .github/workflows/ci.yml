@@ -4,16 +4,17 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
-        image: postgres:15
+        image: postgres:15@sha256:9b1d34adbce1dd07ee6e94b4a2cf698884b89bd44a6c9c12f5da8f3acbfe4957
         env:
           POSTGRES_USER: thingdex
           POSTGRES_PASSWORD: thingdex
@@ -28,11 +29,13 @@ jobs:
     env:
       THINGDEX_TEST_DATABASE_URL: postgresql+psycopg://thingdex:thingdex@localhost:5432/thingdex_test
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.13"
-      - run: pipx install poetry
+      - run: pipx install poetry==2.4.1
       - run: poetry install --all-extras
       - run: poetry run alembic upgrade head
       - run: poetry run alembic check
