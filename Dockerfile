@@ -1,21 +1,34 @@
-FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
+FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS base
 
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PATH=/app/.venv/bin:$PATH
 
-RUN groupadd --system thingdex && useradd --system --gid thingdex --home-dir /app thingdex \
-    && pip install --no-cache-dir --upgrade pip
+FROM base AS dependencies
+
+ARG POETRY_VERSION=2.4.1
+ENV POETRY_VIRTUALENVS_IN_PROJECT=true \
+    POETRY_NO_INTERACTION=1
 
 COPY pyproject.toml poetry.lock README.md /app/
+RUN python -m pip install --no-cache-dir "poetry==${POETRY_VERSION}" \
+    && poetry check --lock \
+    && poetry sync --only main --no-root
+
+FROM base AS runtime
+
+RUN groupadd --system thingdex \
+    && useradd --system --gid thingdex --home-dir /app thingdex
+
+COPY --from=dependencies /app/.venv /app/.venv
 COPY alembic /app/alembic
 COPY alembic.ini /app/
 COPY thingdex /app/thingdex
 COPY scripts/docker-entrypoint.sh /app/scripts/docker-entrypoint.sh
 
-RUN pip install --no-cache-dir . \
-    && chmod 0555 /app/scripts/docker-entrypoint.sh \
+RUN chmod 0555 /app/scripts/docker-entrypoint.sh \
     && chown -R thingdex:thingdex /app
 
 USER thingdex

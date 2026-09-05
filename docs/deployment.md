@@ -13,11 +13,25 @@ docker build -t thingdex:local .
 
 The image:
 
-- installs only runtime dependencies;
+- installs exactly the Poetry-lockfile runtime dependencies into an isolated
+  virtual environment during a build stage;
 - runs as the unprivileged `thingdex` user;
 - applies `alembic upgrade head` in its entrypoint;
 - starts Uvicorn on port `8000`;
 - includes a readiness-based Docker health check.
+
+## Published images
+
+CI builds native amd64 and arm64 candidates, starts each exact candidate against
+a pinned real PostgreSQL image, checks readiness and the unprivileged UID, then
+scans it and exports an SPDX SBOM. Release jobs publish those tested archives;
+they never rebuild after the gate. Immutable per-run references and the final
+multi-architecture index receive GitHub provenance, while platform images also
+receive SBOM attestations.
+
+Production orchestration must use the emitted `THINGDEX_IMAGE=...@sha256:...`
+reference. Human-friendly version and `latest` tags are aliases only and must
+not appear in a deployment bill of materials.
 
 ## Runtime contract
 
