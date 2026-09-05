@@ -25,6 +25,13 @@ def test_container_health_checks_bypass_environment_proxies() -> None:
     assert "urllib.request" not in smoke
 
 
+def test_container_runtime_can_import_application_during_migrations() -> None:
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    entrypoint = Path("scripts/docker-entrypoint.sh").read_text(encoding="utf-8")
+    assert "PYTHONPATH=/app" in dockerfile
+    assert "python -m alembic upgrade head" in entrypoint
+
+
 def test_container_diagnostics_expose_only_lifecycle_facts(monkeypatch) -> None:
     captured = []
 

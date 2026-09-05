@@ -2,6 +2,6 @@
 set -eu
 
 if [ "${THINGDEX_RUN_MIGRATIONS:-true}" = "true" ]; then
-    alembic upgrade head
+    python -m alembic upgrade head
 fi
 exec "$@"
