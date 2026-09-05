@@ -50,6 +50,26 @@ def test_container_log_diagnostics_emit_categories_not_log_text(monkeypatch) -> 
     assert "secret-host" not in category
 
 
+def test_container_log_diagnostics_allowlist_missing_module_names(monkeypatch) -> None:
+    class KnownResult:
+        stdout = "ModuleNotFoundError: No module named 'uvicorn'"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "scripts.container_smoke.subprocess.run", lambda *_a, **_k: KnownResult()
+    )
+    assert failure_categories("safe-id") == "python-import:uvicorn"
+
+    class UnknownResult:
+        stdout = "ModuleNotFoundError: No module named 'customer_secret_module'"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "scripts.container_smoke.subprocess.run", lambda *_a, **_k: UnknownResult()
+    )
+    assert failure_categories("safe-id") == "python-import:unknown"
+
+
 def test_release_context_rejects_feature_branches(monkeypatch) -> None:
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)
     monkeypatch.setenv("GITHUB_REF", "refs/heads/feature")

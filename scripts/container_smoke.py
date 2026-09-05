@@ -40,7 +40,6 @@ def failure_categories(container: str) -> str:
     markers = {
         "entrypoint-format": ("exec format error", "bad interpreter"),
         "missing-runtime-command": ("not found",),
-        "python-import": ("modulenotfounderror", "importerror"),
         "database-connection": (
             "operationalerror",
             "connection refused",
@@ -56,6 +55,29 @@ def failure_categories(container: str) -> str:
         for category, needles in markers.items()
         if any(needle in content for needle in needles)
     ]
+    if "modulenotfounderror" in content or "importerror" in content:
+        allowed_modules = (
+            "alembic",
+            "fastapi",
+            "httpx",
+            "pydantic",
+            "psycopg",
+            "psycopg_binary",
+            "sqlalchemy",
+            "starlette",
+            "thingdex",
+            "uvicorn",
+        )
+        module = next(
+            (
+                candidate
+                for candidate in allowed_modules
+                if f"no module named '{candidate}" in content
+                or f'no module named "{candidate}' in content
+            ),
+            "unknown",
+        )
+        matches.append(f"python-import:{module}")
     return ",".join(matches) or "unclassified"
 
 
