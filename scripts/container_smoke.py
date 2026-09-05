@@ -29,6 +29,36 @@ def container_state(container: str) -> str:
     )
 
 
+def failure_categories(container: str) -> str:
+    """Classify startup logs without emitting their potentially sensitive text."""
+    result = subprocess.run(
+        ["docker", "logs", container],
+        capture_output=True,
+        text=True,
+    )
+    content = (result.stdout + result.stderr).lower()
+    markers = {
+        "entrypoint-format": ("exec format error", "bad interpreter"),
+        "missing-runtime-command": ("not found",),
+        "python-import": ("modulenotfounderror", "importerror"),
+        "database-connection": (
+            "operationalerror",
+            "connection refused",
+            "could not translate host name",
+            "password authentication failed",
+        ),
+        "migration": ("alembic.util.exc", "failed:"),
+        "permission": ("permission denied",),
+        "application-startup": ("application startup failed",),
+    }
+    matches = [
+        category
+        for category, needles in markers.items()
+        if any(needle in content for needle in needles)
+    ]
+    return ",".join(matches) or "unclassified"
+
+
 def main() -> None:
     image = sys.argv[1]
     suffix = uuid.uuid4().hex[:10]
@@ -81,7 +111,11 @@ def main() -> None:
                 break
             state = container_state(application)
             if not state.startswith("status=running "):
-                raise RuntimeError(f"Thingdex candidate stopped before readiness ({state})")
+                category = failure_categories(application)
+                raise RuntimeError(
+                    "Thingdex candidate stopped before readiness "
+                    f"({state} category={category})"
+                )
             if time.monotonic() >= deadline:
                 tcp = subprocess.run(
                     [

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.container_smoke import POSTGRES_IMAGE, container_state
+from scripts.container_smoke import POSTGRES_IMAGE, container_state, failure_categories
 from scripts.release import context
 from scripts.security_gate import findings
 
@@ -37,6 +37,17 @@ def test_container_diagnostics_expose_only_lifecycle_facts(monkeypatch) -> None:
     assert captured[-1] == "safe-id"
     assert "{{.Config.Env}}" not in captured
     assert "{{json .}}" not in captured
+
+
+def test_container_log_diagnostics_emit_categories_not_log_text(monkeypatch) -> None:
+    class Result:
+        stdout = "sqlalchemy.exc.OperationalError: connection refused at secret-host"
+        stderr = ""
+
+    monkeypatch.setattr("scripts.container_smoke.subprocess.run", lambda *_a, **_k: Result())
+    category = failure_categories("safe-id")
+    assert category == "database-connection"
+    assert "secret-host" not in category
 
 
 def test_release_context_rejects_feature_branches(monkeypatch) -> None:
