@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from thingdex.models import PrintIntent
 from thingdex.print_intents import (
     PermanentDeliveryError,
+    PrintHubConnector,
     deliver_one,
     queue_print_intent,
     resolve_intent_variables,
@@ -153,3 +154,42 @@ def test_operator_retry_starts_a_fresh_bounded_attempt_budget() -> None:
         assert retried.state == "pending"
         assert retried.attempts == 0
         assert retried.last_error is None
+
+
+def test_printhub_connector_carries_the_outbox_identity(monkeypatch) -> None:
+    sessions = _sessions()
+    intent_id = _intent(sessions)
+    captured = {}
+
+    class Response:
+        status_code = 202
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": "printhub-job", "status": "queued"}
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def post(self, url, json):
+            captured.update(url=url, json=json)
+            return Response()
+
+    monkeypatch.setattr("thingdex.print_intents.httpx.Client", Client)
+    with sessions() as db:
+        response = PrintHubConnector("http://printhub").submit(
+            db.get(PrintIntent, intent_id)
+        )
+
+    assert response["id"] == "printhub-job"
+    assert captured["json"]["origin"] == "thingdex"
+    assert captured["json"]["origin_reference"] == str(intent_id)

@@ -68,6 +68,11 @@ body. Thingdex journals every event ID, applies only increasing per-intent
 sequences, and treats duplicates and stale deliveries as successful no-ops.
 The inbox is disabled unless `THINGDEX_PRINTHUB_EVENT_SECRET` is configured.
 
+The connector includes the immutable `PrintIntent.id` as PrintHub's
+`origin_reference`. PrintHub persists each resulting status transition in its
+own outbox before advancing the job's integration sequence, then signs and
+retries delivery to this inbox independently from the print request.
+
 The old `item_types.label_template_id` and per-location metadata remain as a
 compatibility fallback for manual reprints during migration. New automation
 should use `/v1/label-profiles`.

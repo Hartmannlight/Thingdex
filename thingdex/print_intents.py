@@ -86,6 +86,7 @@ class PrintHubConnector:
                     "variables": intent.variables,
                     "idempotency_key": intent.idempotency_key,
                     "origin": "thingdex",
+                    "origin_reference": str(intent.id),
                 },
             )
             try:
