@@ -115,12 +115,12 @@ def test_manual_item_and_location_reprints_are_durably_queued(label_client):
 
 
 def test_create_commits_inventory_and_outbox_without_calling_printhub(label_client, monkeypatch):
-    from thingdex import labeling
+    from thingdex.print_intents import PrintHubConnector
 
-    def fail_if_called(**_kwargs):
+    def fail_if_called(*_args, **_kwargs):
         raise AssertionError("The request path must not call PrintHub")
 
-    monkeypatch.setattr(labeling, "print_label", fail_if_called)
+    monkeypatch.setattr(PrintHubConnector, "submit", fail_if_called)
     root = _get_root_location(label_client)
     item_type = _create_item_type(label_client, name="QueuedOnCreate")
 

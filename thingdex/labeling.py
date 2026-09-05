@@ -4,9 +4,6 @@ import os
 from typing import Any
 
 import httpx
-from pydantic import ValidationError
-
-from thingdex.schemas import LabelPrintResult
 
 DEFAULT_PRINTHUB_API_BASE = "http://printhub.xn--jahnstrae-n1a.de"
 DEFAULT_CONTAINER_TEMPLATE_ID = "container-name"
@@ -127,62 +124,3 @@ def build_template_variables(
         if "default" in entry:
             result[name] = entry["default"]
     return result
-
-
-def print_label(
-    *,
-    printer_id: str,
-    template: dict[str, Any],
-    variables: dict[str, Any],
-    return_preview: bool | None = None,
-    template_id: str | None = None,
-    idempotency_key: str | None = None,
-    origin: str | None = None,
-) -> LabelPrintResult:
-    if template_id:
-        url = f"{_printhub_api_base()}/v1/print-jobs"
-        payload: dict[str, Any] = {
-            "printer_id": printer_id,
-            "template_id": template_id,
-            "variables": variables,
-        }
-        if idempotency_key:
-            payload["idempotency_key"] = idempotency_key
-        if origin:
-            payload["origin"] = origin
-    else:
-        url = f"{_printhub_api_base()}/v1/printers/{printer_id}/prints/template"
-        payload = {"template": template}
-        if variables:
-            payload["variables"] = variables
-        if return_preview is not None:
-            payload["return_preview"] = return_preview
-    try:
-        with httpx.Client(timeout=15.0) as client:
-            resp = client.post(url, json=payload)
-            resp.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        detail = exc.response.text.strip()
-        message = detail or f"Print request failed ({exc.response.status_code})"
-        raise LabelServiceError(message) from exc
-    except httpx.HTTPError as exc:
-        raise LabelServiceError("Print request failed") from exc
-    try:
-        body = resp.json()
-        if template_id:
-            if body.get("status") == "failed":
-                job_id = body.get("id")
-                message = body.get("error") or "Print job failed"
-                raise LabelServiceError(f"{message} (job {job_id})" if job_id else message)
-            return LabelPrintResult.model_validate(
-                {
-                    "status": "queued" if body.get("status") == "queued" else "sent",
-                    "printer_id": body.get("printer_id", printer_id),
-                    "bytes_sent": body.get("bytes_sent") or 0,
-                    "job_id": body.get("id"),
-                    "job_state": body.get("downstream_job_state") or body.get("status"),
-                }
-            )
-        return LabelPrintResult.model_validate({"status": "sent", **body})
-    except (TypeError, ValueError, ValidationError) as exc:
-        raise LabelServiceError("PrintHub returned an invalid print response") from exc

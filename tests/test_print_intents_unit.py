@@ -191,5 +191,7 @@ def test_printhub_connector_carries_the_outbox_identity(monkeypatch) -> None:
         )
 
     assert response["id"] == "printhub-job"
+    assert captured["url"] == "http://printhub/v1/print-jobs"
+    assert captured["json"]["idempotency_key"].startswith("thingdex:item:")
     assert captured["json"]["origin"] == "thingdex"
     assert captured["json"]["origin_reference"] == str(intent_id)
