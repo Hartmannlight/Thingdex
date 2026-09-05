@@ -62,7 +62,7 @@ def main() -> None:
                 if time.monotonic() >= deadline:
                     raise
                 time.sleep(1)
-        if payload.get("status") != "ready":
+        if payload.get("status") != "ok":
             raise RuntimeError(f"Unexpected readiness payload: {payload}")
         uid = run("docker", "exec", application, "python", "-c", "import os; print(os.getuid())")
         if uid == "0":

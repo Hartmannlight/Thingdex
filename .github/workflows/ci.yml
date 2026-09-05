@@ -27,6 +27,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
+      DATABASE_URL: postgresql+psycopg://thingdex:thingdex@localhost:5432/thingdex_test
       THINGDEX_TEST_DATABASE_URL: postgresql+psycopg://thingdex:thingdex@localhost:5432/thingdex_test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
