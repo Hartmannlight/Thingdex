@@ -15,6 +15,20 @@ def run(*args: str) -> str:
     return subprocess.check_output(args, text=True).strip()
 
 
+def container_state(container: str) -> str:
+    """Return non-sensitive lifecycle facts suitable for public CI output."""
+    return run(
+        "docker",
+        "inspect",
+        "--format",
+        (
+            "status={{.State.Status}} exit={{.State.ExitCode}} "
+            "health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}"
+        ),
+        container,
+    )
+
+
 def main() -> None:
     image = sys.argv[1]
     suffix = uuid.uuid4().hex[:10]
@@ -65,8 +79,25 @@ def main() -> None:
             )
             if ready.returncode == 0:
                 break
+            state = container_state(application)
+            if not state.startswith("status=running "):
+                raise RuntimeError(f"Thingdex candidate stopped before readiness ({state})")
             if time.monotonic() >= deadline:
-                raise RuntimeError("Thingdex candidate did not become ready")
+                tcp = subprocess.run(
+                    [
+                        "docker", "exec", application, "python", "-c",
+                        (
+                            "import socket; connection=socket.create_connection("
+                            "('127.0.0.1',8000),timeout=3); connection.close()"
+                        ),
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                raise RuntimeError(
+                    "Thingdex candidate did not become ready "
+                    f"({state} tcp_probe_exit={tcp.returncode})"
+                )
             time.sleep(1)
         uid = run("docker", "exec", application, "python", "-c", "import os; print(os.getuid())")
         if uid == "0":

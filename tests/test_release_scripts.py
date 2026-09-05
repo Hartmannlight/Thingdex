@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.container_smoke import POSTGRES_IMAGE
+from scripts.container_smoke import POSTGRES_IMAGE, container_state
 from scripts.release import context
 from scripts.security_gate import findings
 
@@ -23,6 +23,20 @@ def test_container_health_checks_bypass_environment_proxies() -> None:
     assert "http.client.HTTPConnection" in smoke
     assert "urllib.request" not in dockerfile
     assert "urllib.request" not in smoke
+
+
+def test_container_diagnostics_expose_only_lifecycle_facts(monkeypatch) -> None:
+    captured = []
+
+    def fake_run(*args: str) -> str:
+        captured.extend(args)
+        return "status=exited exit=1 health=none"
+
+    monkeypatch.setattr("scripts.container_smoke.run", fake_run)
+    assert container_state("safe-id") == "status=exited exit=1 health=none"
+    assert captured[-1] == "safe-id"
+    assert "{{.Config.Env}}" not in captured
+    assert "{{json .}}" not in captured
 
 
 def test_release_context_rejects_feature_branches(monkeypatch) -> None:
