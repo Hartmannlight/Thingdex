@@ -7,7 +7,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from thingdex.db import SessionLocal
-from thingdex.labeling import LabelServiceError, fetch_template, validate_template_against_schema
 from thingdex.models import Item, ItemType
 from thingdex.schemas import ItemTypeCreate, ItemTypeOut, ItemTypeUpdate
 from thingdex.validation import SchemaValidationError, validate_item_type_schema, validate_props
@@ -31,20 +30,6 @@ def create_item_type(payload: ItemTypeCreate, db: Session = Depends(get_db)):
         validate_item_type_schema(item_schema)
     except SchemaValidationError as exc:
         raise HTTPException(status_code=400, detail=exc.errors) from exc
-    if payload.label_template_id:
-        try:
-            template = fetch_template(payload.label_template_id)
-        except LabelServiceError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        missing = validate_template_against_schema(template, item_schema)
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Template variables missing or not required in schema: "
-                    f"{', '.join(missing)}"
-                ),
-            )
     item_type = ItemType(
         name=payload.name,
         schema=item_schema,
@@ -103,21 +88,6 @@ def update_item_type(item_type_id: UUID, payload: ItemTypeUpdate, db: Session = 
         validate_item_type_schema(target_schema)
     except SchemaValidationError as exc:
         raise HTTPException(status_code=400, detail=exc.errors) from exc
-
-    if target_template_id:
-        try:
-            template = fetch_template(target_template_id)
-        except LabelServiceError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        missing = validate_template_against_schema(template, target_schema)
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Template variables missing or not required in schema: "
-                    f"{', '.join(missing)}"
-                ),
-            )
 
     if payload.schema_ is not None:
         invalid_items: list[dict[str, object]] = []

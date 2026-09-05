@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 import subprocess
 import sys
 import time
-import urllib.request
 import uuid
 
 
@@ -24,7 +21,6 @@ def main() -> None:
     network = f"thingdex-smoke-{suffix}"
     database = f"thingdex-db-{suffix}"
     application = ""
-    Path("artifacts").mkdir(exist_ok=True)
     run("docker", "network", "create", network)
     try:
         run(
@@ -47,31 +43,35 @@ def main() -> None:
             "docker", "run", "-d", "--network", network,
             "--cap-drop=ALL", "--security-opt=no-new-privileges:true",
             "-e", f"DATABASE_URL=postgresql+psycopg://thingdex:thingdex@{database}:5432/thingdex",
-            "-e", "LABEL_PRINTING_ENABLED=false", "-p", "127.0.0.1::8000", image,
+            "-e", "LABEL_PRINTING_ENABLED=false", image,
         )
-        binding = run("docker", "port", application, "8000/tcp").splitlines()[0]
         deadline = time.monotonic() + 90
         while True:
-            try:
-                with urllib.request.urlopen(f"http://{binding}/health/ready", timeout=3) as response:
-                    status = response.status
-                    payload = json.load(response)
-                if status == 200:
-                    break
-            except (OSError, ValueError):
-                if time.monotonic() >= deadline:
-                    raise
-                time.sleep(1)
-        if payload.get("status") != "ok":
-            raise RuntimeError(f"Unexpected readiness payload: {payload}")
+            ready = subprocess.run(
+                [
+                    "docker", "exec", application, "python", "-c",
+                    (
+                        "import json,urllib.request; "
+                        "response=urllib.request.urlopen("
+                        "'http://127.0.0.1:8000/health/ready',timeout=3); "
+                        "assert response.status == 200; "
+                        "assert json.load(response).get('status') == 'ok'"
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if ready.returncode == 0:
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Thingdex candidate did not become ready")
+            time.sleep(1)
         uid = run("docker", "exec", application, "python", "-c", "import os; print(os.getuid())")
         if uid == "0":
             raise RuntimeError("Thingdex candidate runs as root")
     finally:
         for container in (application, database):
             if container:
-                logs = subprocess.run(["docker", "logs", container], capture_output=True, text=True)
-                Path(f"artifacts/{container[:12]}.log").write_text(logs.stdout + logs.stderr, encoding="utf-8")
                 subprocess.run(["docker", "rm", "-f", container], check=False)
         subprocess.run(["docker", "network", "rm", network], check=False)
 

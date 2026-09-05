@@ -75,7 +75,10 @@ retries delivery to this inbox independently from the print request.
 
 The old `item_types.label_template_id` and per-location metadata remain as a
 compatibility fallback for manual reprints during migration. New automation
-should use `/v1/label-profiles`.
+should use `/v1/label-profiles`. Thingdex stores these legacy template IDs as
+opaque references and does not contact PrintHub while creating or changing an
+item type. Their availability and compatibility are checked only at an explicit
+integration boundary or while processing a queued print intent.
 
 ```text
 ThingdexUI -> Thingdex transaction -> outbox worker -> PrintHub -> PrinterFleet

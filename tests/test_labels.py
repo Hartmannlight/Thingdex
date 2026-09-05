@@ -55,6 +55,18 @@ def test_template_variables_support_typed_source_hints():
     ) == {"title": "Cordless drill", "identifier": "item-42", "serial": "SN-42"}
 
 
+def test_item_type_template_reference_does_not_require_printhub(label_client):
+    created = _create_item_type(label_client, name="OfflineTemplateReference")
+    assert created["label_template_id"] == "item-test"
+
+    updated = label_client.patch(
+        f"/v1/item-types/{created['id']}",
+        json={"label_template_id": "future-template"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["label_template_id"] == "future-template"
+
+
 def test_manual_item_and_location_reprints_are_durably_queued(label_client):
     root = _get_root_location(label_client)
     item_type = _create_item_type(label_client)
