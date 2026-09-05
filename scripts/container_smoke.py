@@ -51,11 +51,13 @@ def main() -> None:
                 [
                     "docker", "exec", application, "python", "-c",
                     (
-                        "import json,urllib.request; "
-                        "response=urllib.request.urlopen("
-                        "'http://127.0.0.1:8000/health/ready',timeout=3); "
+                        "import http.client,json; "
+                        "connection=http.client.HTTPConnection("
+                        "'127.0.0.1',8000,timeout=3); "
+                        "connection.request('GET','/health/ready'); "
+                        "response=connection.getresponse(); "
                         "assert response.status == 200; "
-                        "assert json.load(response).get('status') == 'ok'"
+                        "assert json.loads(response.read()).get('status') == 'ok'"
                     ),
                 ],
                 capture_output=True,

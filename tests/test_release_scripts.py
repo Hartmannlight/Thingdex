@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from scripts.container_smoke import POSTGRES_IMAGE
@@ -12,6 +14,15 @@ def test_container_smoke_uses_an_immutable_postgres_image() -> None:
     assert name == "postgres:15"
     assert len(digest) == 64
     assert set(digest) <= set("0123456789abcdef")
+
+
+def test_container_health_checks_bypass_environment_proxies() -> None:
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    smoke = Path("scripts/container_smoke.py").read_text(encoding="utf-8")
+    assert "http.client.HTTPConnection" in dockerfile
+    assert "http.client.HTTPConnection" in smoke
+    assert "urllib.request" not in dockerfile
+    assert "urllib.request" not in smoke
 
 
 def test_release_context_rejects_feature_branches(monkeypatch) -> None:
