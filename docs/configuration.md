@@ -17,6 +17,7 @@ service manager, secret store, or container runtime.
 | `THINGDEX_PRINTHUB_EVENT_SECRET` | unset | Yes for status events | HMAC-SHA256 secret for the replay-safe PrintHub event inbox |
 | `THINGDEX_PRINT_WORKER_INTERVAL_SECONDS` | `1` | No | Idle polling interval of the separately run print worker |
 | `THINGDEX_PRINT_MAX_ATTEMPTS` | `10` | No | Attempts before an intent requires an explicit authenticated retry |
+| `THINGDEX_RUN_MIGRATIONS` | `true` | No | Run Alembic before the container command; set `false` for print workers |
 | `LABEL_API_BASE` | derived as `${PRINTHUB_API_BASE}/v1` | Legacy migration only | Optional override for an older separate template service |
 | `LABEL_CONTAINER_TEMPLATE_ID` | `container-name` | No | Fallback template ID for location labels |
 
