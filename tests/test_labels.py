@@ -1,16 +1,22 @@
+import hashlib
+import hmac
+import json
+from datetime import datetime, timezone
+
+
 def _create_item_type(client, name="LabeledType"):
-    payload = {
-        "name": name,
-        "schema": {
-            "fields": {
-                "serial": {"type": "string", "required": True},
+    response = client.post(
+        "/v1/item-types",
+        json={
+            "name": name,
+            "schema": {
+                "fields": {"serial": {"type": "string", "required": True}},
+                "allow_additional": False,
             },
-            "allow_additional": False,
+            "ui": {},
+            "label_template_id": "item-test",
         },
-        "ui": {},
-        "label_template_id": "item-test",
-    }
-    response = client.post("/v1/item-types", json=payload)
+    )
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -21,12 +27,20 @@ def _get_root_location(client):
     return response.json()
 
 
+ADMIN = {"Authorization": "Bearer test-print-admin-token"}
+
+
 def test_template_variables_support_typed_source_hints():
     from thingdex.labeling import build_template_variables, validate_template_against_schema
 
     template = {
         "variables": [
-            {"name": "title", "mode": "required", "type": "text", "source_hint": "entity.display_name"},
+            {
+                "name": "title",
+                "mode": "required",
+                "type": "text",
+                "source_hint": "entity.display_name",
+            },
             {"name": "identifier", "mode": "required", "source_hint": "entity.id"},
             {"name": "serial", "mode": "required"},
         ]
@@ -41,56 +55,7 @@ def test_template_variables_support_typed_source_hints():
     ) == {"title": "Cordless drill", "identifier": "item-42", "serial": "SN-42"}
 
 
-def test_label_print_item_and_location(label_client, monkeypatch):
-    from thingdex import labeling
-    from thingdex.routes import item_types as item_types_routes
-    from thingdex.routes import items as items_routes
-    from thingdex.routes import labels as labels_routes
-    from thingdex.routes import locations as locations_routes
-
-    def fake_fetch_template(template_id: str):
-        if template_id == "container-test":
-            return {
-                "template": {"id": template_id},
-                "variables": [
-                    {"name": "location_uuid", "mode": "required"},
-                    {"name": "container_name", "mode": "required"},
-                ],
-            }
-        return {
-            "template": {"id": template_id},
-            "variables": [{"name": "serial", "mode": "required"}],
-        }
-
-    print_calls = []
-
-    def fake_print_label(*, printer_id, template, variables, return_preview=None, **kwargs):
-        print_calls.append(
-            {
-                "printer_id": printer_id,
-                "template": template,
-                "variables": variables,
-                "return_preview": return_preview,
-            }
-        )
-        return {
-            "printer_id": printer_id,
-            "bytes_sent": 42,
-            "preview_png_base64": "preview" if return_preview else None,
-        }
-
-    monkeypatch.setattr(labeling, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(labeling, "print_label", fake_print_label)
-    monkeypatch.setattr(item_types_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(items_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(items_routes, "print_label", fake_print_label)
-    monkeypatch.setattr(labels_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(labels_routes, "print_label", fake_print_label)
-    monkeypatch.setattr(labeling, "container_template_id", lambda: "container-test")
-    monkeypatch.setattr(locations_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(locations_routes, "print_label", fake_print_label)
-    monkeypatch.setattr(locations_routes, "container_template_id", lambda: "container-test")
-
+def test_manual_item_and_location_reprints_are_durably_queued(label_client):
     root = _get_root_location(label_client)
     item_type = _create_item_type(label_client)
     item = label_client.post(
@@ -104,14 +69,17 @@ def test_label_print_item_and_location(label_client, monkeypatch):
 
     item_label = label_client.post(
         "/v1/labels/print",
-        json={"printer_id": "demo", "item_id": item["id"], "return_preview": True},
+        json={"printer_id": "demo", "item_id": item["id"]},
     )
-    assert item_label.status_code == 200, item_label.text
-    assert item_label.json()["status"] == "sent"
-    assert item_label.json()["printer_id"] == "demo"
-    assert item_label.json()["bytes_sent"] == 42
-    assert print_calls[-1]["variables"]["serial"] == "L-1"
-    assert print_calls[-1]["variables"]["internal_uuid"] == item["id"]
+    assert item_label.status_code == 202, item_label.text
+    assert item_label.json()["status"] == "queued"
+    intent = label_client.get(
+        f"/v1/print-intents/{item_label.json()['job_id']}", headers=ADMIN
+    )
+    assert intent.status_code == 200
+    assert intent.json()["entity_id"] == item["id"]
+    assert intent.json()["state"] == "pending"
+    assert "variables" not in intent.json()
 
     location = label_client.post(
         "/v1/locations",
@@ -126,75 +94,40 @@ def test_label_print_item_and_location(label_client, monkeypatch):
         "/v1/labels/print",
         json={"printer_id": "demo", "location_id": location["id"]},
     )
-    assert location_label.status_code == 200, location_label.text
-    assert print_calls[-1]["variables"]["container_name"] == "Shelf"
-    assert print_calls[-1]["variables"]["internal_uuid"] == location["id"]
-
-    location_override = label_client.post(
-        "/v1/labels/print",
-        json={
-            "printer_id": "demo",
-            "location_id": location["id"],
-            "template_id": "container-test",
-        },
-    )
-    assert location_override.status_code == 200, location_override.text
-    assert print_calls[-1]["template"]["id"] == "container-test"
+    assert location_label.status_code == 202, location_label.text
+    intent = label_client.get(
+        f"/v1/print-intents/{location_label.json()['job_id']}", headers=ADMIN
+    ).json()
+    assert intent["entity_id"] == location["id"]
+    assert intent["template_id"] == "container-test"
 
 
-def test_label_print_on_create_item_and_location(label_client, monkeypatch):
+def test_create_commits_inventory_and_outbox_without_calling_printhub(label_client, monkeypatch):
     from thingdex import labeling
-    from thingdex.routes import item_types as item_types_routes
-    from thingdex.routes import items as items_routes
-    from thingdex.routes import locations as locations_routes
 
-    def fake_fetch_template(template_id: str):
-        if template_id == "container-test":
-            return {
-                "template": {"id": template_id},
-                "variables": [
-                    {"name": "location_uuid", "mode": "required"},
-                    {"name": "container_name", "mode": "required"},
-                ],
-            }
-        return {
-            "template": {"id": template_id},
-            "variables": [{"name": "serial", "mode": "required"}],
-        }
+    def fail_if_called(**_kwargs):
+        raise AssertionError("The request path must not call PrintHub")
 
-    def fake_print_label(*, printer_id, template, variables, return_preview=None, **kwargs):
-        return {
-            "printer_id": printer_id,
-            "bytes_sent": 42,
-            "preview_png_base64": "preview" if return_preview else None,
-        }
-
-    monkeypatch.setattr(labeling, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(labeling, "print_label", fake_print_label)
-    monkeypatch.setattr(labeling, "container_template_id", lambda: "container-test")
-    monkeypatch.setattr(item_types_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(items_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(items_routes, "print_label", fake_print_label)
-    monkeypatch.setattr(locations_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(locations_routes, "print_label", fake_print_label)
-    monkeypatch.setattr(locations_routes, "container_template_id", lambda: "container-test")
-
+    monkeypatch.setattr(labeling, "print_label", fail_if_called)
     root = _get_root_location(label_client)
-    item_type = _create_item_type(label_client, name="LabeledOnCreate")
+    item_type = _create_item_type(label_client, name="QueuedOnCreate")
 
     created_item = label_client.post(
         "/v1/items",
         json={
             "type_id": item_type["id"],
             "location_id": root["id"],
-            "props": {"serial": "LC-1"},
-            "label_print": {"printer_id": "demo", "return_preview": True},
+            "props": {"serial": "Q-1"},
+            "label_print": {"printer_id": "demo"},
         },
     )
     assert created_item.status_code == 200, created_item.text
-    created_item_body = created_item.json()
-    assert created_item_body["data"]["props"]["serial"] == "LC-1"
-    assert created_item_body["side_effects"]["label_print"]["success"] is True
+    side_effect = created_item.json()["side_effects"]["label_print"]
+    assert side_effect["success"] is True
+    assert side_effect["result"]["job_state"] == "pending"
+    assert label_client.get(
+        f"/v1/print-intents/{side_effect['result']['job_id']}", headers=ADMIN
+    ).status_code == 200
 
     created_location = label_client.post(
         "/v1/locations",
@@ -206,125 +139,24 @@ def test_label_print_on_create_item_and_location(label_client, monkeypatch):
         },
     )
     assert created_location.status_code == 200, created_location.text
-    created_location_body = created_location.json()
-    assert created_location_body["data"]["name"] == "Drawer"
-    assert created_location_body["side_effects"]["label_print"]["success"] is True
+    assert created_location.json()["side_effects"]["label_print"]["success"] is True
 
 
-def test_label_print_failure_on_create_is_reported_without_rollback(label_client, monkeypatch):
-    from thingdex import labeling
-    from thingdex.labeling import LabelServiceError
-    from thingdex.routes import item_types as item_types_routes
-    from thingdex.routes import items as items_routes
-    from thingdex.routes import locations as locations_routes
-
-    def fake_fetch_template(template_id: str):
-        if template_id == "container-test":
-            return {
-                "template": {"id": template_id},
-                "variables": [
-                    {"name": "location_uuid", "mode": "required"},
-                    {"name": "container_name", "mode": "required"},
-                ],
-            }
-        return {
-            "template": {"id": template_id},
-            "variables": [{"name": "serial", "mode": "required"}],
-        }
-
-    def failing_print_label(*, printer_id, template, variables, return_preview=None, **kwargs):
-        raise LabelServiceError("Printer unavailable")
-
-    monkeypatch.setattr(labeling, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(labeling, "container_template_id", lambda: "container-test")
-    monkeypatch.setattr(item_types_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(items_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(items_routes, "print_label", failing_print_label)
-    monkeypatch.setattr(locations_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(locations_routes, "print_label", failing_print_label)
-    monkeypatch.setattr(locations_routes, "container_template_id", lambda: "container-test")
-
-    root = _get_root_location(label_client)
-    item_type = _create_item_type(label_client, name="LabeledPrintFailure")
-
-    created_item = label_client.post(
-        "/v1/items",
-        json={
-            "type_id": item_type["id"],
-            "location_id": root["id"],
-            "props": {"serial": "FAIL-1"},
-            "label_print": {"printer_id": "demo"},
-        },
-    )
-    assert created_item.status_code == 200, created_item.text
-    item_body = created_item.json()
-    assert item_body["side_effects"]["label_print"] == {
-        "requested": True,
-        "success": False,
-        "result": None,
-        "error": "Printer unavailable",
-    }
-    assert label_client.get(f"/v1/items/{item_body['data']['id']}").status_code == 200
-
-    created_location = label_client.post(
-        "/v1/locations",
-        json={
-            "name": "Print Failure Shelf",
-            "parent_id": root["id"],
-            "kind": "shelf",
-            "label_print": {"printer_id": "demo", "template_id": "container-test"},
-        },
-    )
-    assert created_location.status_code == 200, created_location.text
-    location_body = created_location.json()
-    assert location_body["side_effects"]["label_print"] == {
-        "requested": True,
-        "success": False,
-        "result": None,
-        "error": "Printer unavailable",
-    }
-    assert label_client.get(f"/v1/locations/{location_body['data']['id']}").status_code == 200
-
-
-def test_label_profiles_automatically_queue_new_item_and_location_labels(label_client, monkeypatch):
-    from thingdex.routes import item_types as item_types_routes
-    from thingdex.routes import items as items_routes
+def test_label_profiles_queue_new_entities_with_stable_destinations(label_client, monkeypatch):
     from thingdex.routes import label_profiles as profile_routes
-    from thingdex.routes import locations as locations_routes
 
     def fake_fetch_template(template_id: str):
         variables = (
             [{"name": "serial", "mode": "required"}]
-            if template_id in {"item-auto", "item-test"}
-            else [
-                {"name": "location_uuid", "mode": "required"},
-                {"name": "container_name", "mode": "required"},
-            ]
+            if template_id == "item-auto"
+            else [{"name": "container_name", "mode": "required"}]
         )
         return {"template": {"id": template_id}, "variables": variables}
 
-    print_calls = []
-
-    def fake_print_label(**kwargs):
-        print_calls.append(kwargs)
-        return {
-            "status": "queued",
-            "printer_id": kwargs["printer_id"],
-            "bytes_sent": 42,
-            "job_id": "job-test",
-            "job_state": "queued",
-        }
-
     monkeypatch.setattr(profile_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(item_types_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(items_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(items_routes, "print_label", fake_print_label)
-    monkeypatch.setattr(locations_routes, "fetch_template", fake_fetch_template)
-    monkeypatch.setattr(locations_routes, "print_label", fake_print_label)
-
     root = _get_root_location(label_client)
     item_type = _create_item_type(label_client, name="AutoProfileType")
-    item_profile = label_client.post(
+    assert label_client.post(
         "/v1/label-profiles",
         json={
             "name": "Items",
@@ -333,9 +165,8 @@ def test_label_profiles_automatically_queue_new_item_and_location_labels(label_c
             "template_id": "item-auto",
             "printer_id": "packing-desk",
         },
-    )
-    assert item_profile.status_code == 201, item_profile.text
-    location_profile = label_client.post(
+    ).status_code == 201
+    assert label_client.post(
         "/v1/label-profiles",
         json={
             "name": "Containers",
@@ -344,23 +175,84 @@ def test_label_profiles_automatically_queue_new_item_and_location_labels(label_c
             "template_id": "location-auto",
             "printer_id": "warehouse",
         },
-    )
-    assert location_profile.status_code == 201, location_profile.text
+    ).status_code == 201
 
     item = label_client.post(
         "/v1/items",
-        json={"type_id": item_type["id"], "location_id": root["id"], "props": {"serial": "AUTO-1"}},
-    )
-    assert item.status_code == 200, item.text
-    assert item.json()["side_effects"]["label_print"]["success"] is True
-    assert print_calls[-1]["template_id"] == "item-auto"
-    assert print_calls[-1]["idempotency_key"].startswith("thingdex:item:")
+        json={
+            "type_id": item_type["id"],
+            "location_id": root["id"],
+            "props": {"serial": "AUTO-1"},
+        },
+    ).json()
+    item_job = item["side_effects"]["label_print"]["result"]["job_id"]
+    item_intent = label_client.get(f"/v1/print-intents/{item_job}", headers=ADMIN).json()
+    assert item_intent["template_id"] == "item-auto"
+    assert item_intent["printer_id"] == "packing-desk"
 
     location = label_client.post(
         "/v1/locations",
         json={"name": "Auto bin", "parent_id": root["id"], "kind": "container"},
-    )
-    assert location.status_code == 200, location.text
-    assert location.json()["side_effects"]["label_print"]["success"] is True
-    assert print_calls[-1]["template_id"] == "location-auto"
-    assert print_calls[-1]["idempotency_key"].startswith("thingdex:location:")
+    ).json()
+    location_job = location["side_effects"]["label_print"]["result"]["job_id"]
+    location_intent = label_client.get(
+        f"/v1/print-intents/{location_job}", headers=ADMIN
+    ).json()
+    assert location_intent["template_id"] == "location-auto"
+    assert location_intent["printer_id"] == "warehouse"
+
+
+def test_print_intent_admin_endpoints_fail_closed_without_valid_token(label_client):
+    assert label_client.get("/v1/print-intents").status_code == 401
+    assert label_client.get(
+        "/v1/print-intents", headers={"Authorization": "Bearer wrong"}
+    ).status_code == 403
+
+
+def test_signed_printhub_events_are_idempotent_and_sequence_guarded(label_client):
+    root = _get_root_location(label_client)
+    item_type = _create_item_type(label_client, name="EventType")
+    created = label_client.post(
+        "/v1/items",
+        json={
+            "type_id": item_type["id"],
+            "location_id": root["id"],
+            "props": {"serial": "EVENT-1"},
+            "label_print": {"printer_id": "demo"},
+        },
+    ).json()
+    intent_id = created["side_effects"]["label_print"]["result"]["job_id"]
+
+    def signed_event(event_id: str, sequence: int, state: str):
+        body = json.dumps(
+            {
+                "event_id": event_id,
+                "intent_id": intent_id,
+                "sequence": sequence,
+                "job_id": "printhub-job",
+                "job_state": state,
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+                "detail": {},
+            },
+            separators=(",", ":"),
+        ).encode()
+        signature = "sha256=" + hmac.new(
+            b"test-event-secret", body, hashlib.sha256
+        ).hexdigest()
+        return label_client.post(
+            "/v1/integrations/printhub/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Thingdex-Signature": signature,
+            },
+        )
+
+    applied = signed_event("event-2", 2, "submitted")
+    duplicate = signed_event("event-2", 2, "submitted")
+    stale = signed_event("event-1", 1, "preparing")
+    assert applied.json()["result"] == "applied"
+    assert duplicate.json()["result"] == "duplicate"
+    assert stale.json()["result"] == "stale"
+    intent = label_client.get(f"/v1/print-intents/{intent_id}", headers=ADMIN).json()
+    assert intent["printhub_job_state"] == "submitted"

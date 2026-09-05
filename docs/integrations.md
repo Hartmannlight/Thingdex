@@ -15,7 +15,8 @@ canonical sites.
 | [PrintHub-ZPL-II](https://github.com/Hartmannlight/PrintHub-ZPL-ll) | Templates, rendering, persistent print jobs and printer gateway | Optional integration; receives idempotent label jobs |
 | [LabelArchitect / PrintHub Studio](https://github.com/Hartmannlight/LabelArchitect) | Template library, desktop designer, mobile quick print, printer and job UI | Standalone PrintHub frontend; Thingdex does not depend on it at runtime |
 | [LabelGallery](https://github.com/Hartmannlight/LabelGallery) | Legacy template/operator UI | Superseded by PrintHub Studio and not part of the default topology |
-| [ZebraTamer](https://github.com/Hartmannlight/ZebraTamer) | Local-network printer discovery, status and standardized ZPL job handoff | Used by PrintHub, never called by Thingdex |
+| PrinterFleet | Central physical printer registry, routing and delivery | Used by PrintHub, never called by Thingdex |
+| [ZebraTamer / PrintAgent](https://github.com/Hartmannlight/ZebraTamer) | Optional USB/Bluetooth/serial edge access | Used by PrinterFleet, never called by Thingdex |
 
 ## OpenAPI and SDK
 
@@ -39,9 +40,9 @@ layouts, ZPL, printer configuration or device status. PrintHub owns all of
 those concerns and remains useful without Thingdex through its mobile quick
 print UI and API.
 
-Thingdex starts and saves inventory when PrintHub is absent. A failed label job
-is reported as a failed side effect after the inventory transaction and never
-rolls the inventory record back.
+Thingdex starts and saves inventory when PrintHub is absent. Inventory and a
+requested PrintIntent commit together; delivery runs later in a separate
+worker and cannot roll the inventory record back.
 
 ## Automatic label flow
 
@@ -53,23 +54,28 @@ Label support is optional and disabled by default. When enabled:
    and optional explicit bindings;
 3. an operator creates an item or location without selecting any printing
    options;
-4. Thingdex commits the inventory record first, resolves the matching enabled
-   profile and fills the template variables;
-5. Thingdex creates a persistent PrintHub job with an idempotency key based on
-   the new entity ID;
-6. PrintHub renders the saved template and hands ZPL to ZebraTamer or a legacy
-   raw-9100 printer;
-7. PrintHub keeps the job status and error. Failed jobs can be retried from
-   PrintHub Studio without creating the inventory object again.
+4. Thingdex resolves the profile and writes an immutable variable snapshot plus
+   stable idempotency key to its transactional outbox;
+5. the inventory row and PrintIntent commit atomically without contacting
+   PrintHub;
+6. a separate Thingdex worker submits pending intents idempotently to PrintHub;
+7. PrintHub prepares the label and asks PrinterFleet to deliver it directly or
+   through an optional PrintAgent;
+8. authenticated operators can inspect and retry terminal outbox failures.
+
+PrintHub status callbacks use an HMAC-SHA256 signature over the exact request
+body. Thingdex journals every event ID, applies only increasing per-intent
+sequences, and treats duplicates and stale deliveries as successful no-ops.
+The inbox is disabled unless `THINGDEX_PRINTHUB_EVENT_SECRET` is configured.
 
 The old `item_types.label_template_id` and per-location metadata remain as a
 compatibility fallback for manual reprints during migration. New automation
 should use `/v1/label-profiles`.
 
 ```text
-ThingdexUI -> Thingdex -> PrintHub API -> ZebraTamer -> Zebra printer
-     |           |             |
- inventory   label profile   template + durable job
+ThingdexUI -> Thingdex transaction -> outbox worker -> PrintHub -> PrinterFleet
+                   |                                      |          |
+           inventory + intent                    template/job   device/agent
 ```
 
 The template language, editor behavior, printer configuration, and rendering

@@ -12,18 +12,15 @@ from thingdex.crud import (
 )
 from thingdex.db import SessionLocal
 from thingdex.labeling import (
-    LabelServiceError,
-    build_template_variables,
     container_template_id,
-    fetch_template,
     label_printing_enabled,
-    print_label,
-    required_template_variables,
 )
 from thingdex.models import Item, LabelProfile, Location
+from thingdex.print_intents import queue_print_intent, resolve_intent_variables
 from thingdex.schemas import (
     ItemOut,
     LabelPrintRequest,
+    LabelPrintResult,
     LocationCreate,
     LocationCreateResponse,
     LocationOut,
@@ -86,70 +83,62 @@ def create_location(payload: LocationCreate, db: Session = Depends(get_db)):
         meta=payload.meta or {},
     )
     db.add(location)
-    db.commit()
-    db.refresh(location)
+    db.flush()
     label_print_result = None
     if label_request is not None:
         label_print_result = SideEffectResult(requested=True, success=False)
         if not label_printing_enabled():
             label_print_result.error = "Label printing is disabled"
-            return LocationCreateResponse(
-                data=location,
-                side_effects=SideEffects(label_print=label_print_result),
-            )
-        try:
+        else:
             template_id = label_request.template_id
             if not template_id and isinstance(location.meta, dict):
                 template_id = location.meta.get("label_template_id")
             if not template_id:
                 template_id = container_template_id()
-            template = fetch_template(template_id)
-            base_variables = {
-                "location_uuid": str(location.id),
-                "container_name": location.name,
-                "internal_uuid": str(location.id),
-            }
-            variables = build_template_variables(
-                template,
-                location.meta or {},
-                context={
-                    "entity": {
-                        "id": str(location.id),
-                        "display_name": location.name,
-                    },
-                    "location": {
-                        "id": str(location.id),
-                        "name": location.name,
-                        "kind": location.kind,
-                        "meta": location.meta or {},
-                    },
+            context = {
+                "entity": {
+                    "id": str(location.id),
+                    "display_name": location.name,
                 },
+                "location": {
+                    "id": str(location.id),
+                    "name": location.name,
+                    "kind": location.kind,
+                    "meta": location.meta or {},
+                },
+            }
+            variables = resolve_intent_variables(
+                location.meta or {},
+                context=context,
                 bindings=profile_bindings,
             )
-            variables.update(base_variables)
-            missing = [name for name in required_template_variables(template) if name not in variables]
-            if missing:
-                label_print_result.error = (
-                    "Missing required template variables: "
-                    f"{', '.join(missing)}"
-                )
-                return LocationCreateResponse(
-                    data=location,
-                    side_effects=SideEffects(label_print=label_print_result),
-                )
-            print_response = print_label(
-                printer_id=label_request.printer_id,
-                template=template.get("template", {}),
-                variables=variables,
-                return_preview=label_request.return_preview,
+            variables.update(
+                {
+                    "location_uuid": str(location.id),
+                    "container_name": location.name,
+                    "internal_uuid": str(location.id),
+                }
+            )
+            intent = queue_print_intent(
+                db,
+                entity_kind="location",
+                entity_id=location.id,
+                entity_version="1",
                 template_id=template_id,
-                idempotency_key=f"thingdex:location:{location.id}:create",
-                origin="thingdex",
+                printer_id=label_request.printer_id,
+                variables=variables,
+                operation="create",
             )
             label_print_result.success = True
-            label_print_result.result = print_response
-        except LabelServiceError as exc:
-            label_print_result.error = str(exc)
+            label_print_result.result = LabelPrintResult(
+                status="queued",
+                printer_id=label_request.printer_id,
+                bytes_sent=0,
+                job_id=str(intent.id),
+                job_state="pending",
+            )
+    db.commit()
+    db.refresh(location)
     return LocationCreateResponse(
         data=location,
         side_effects=SideEffects(label_print=label_print_result),

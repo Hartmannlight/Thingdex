@@ -1,19 +1,16 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from thingdex.db import SessionLocal
-from thingdex.labeling import (
-    LabelServiceError,
-    build_template_variables,
-    fetch_template,
-    label_printing_enabled,
-    print_label,
-    required_template_variables,
-)
+from thingdex.labeling import label_printing_enabled
 from thingdex.models import Item, ItemType, LabelProfile, Location
+from thingdex.print_intents import queue_print_intent, resolve_intent_variables
 from thingdex.schemas import LabelPrintResult, LabelReprintRequest
+
 
 router = APIRouter(prefix="/v1/labels", tags=["labels"])
 
@@ -26,9 +23,19 @@ def get_db():
         db.close()
 
 
-@router.post("/print", response_model=LabelPrintResult)
+def _queued(intent, printer_id: str) -> LabelPrintResult:
+    return LabelPrintResult(
+        status="queued",
+        printer_id=printer_id,
+        bytes_sent=0,
+        job_id=str(intent.id),
+        job_state="pending",
+    )
+
+
+@router.post("/print", response_model=LabelPrintResult, status_code=202)
 def print_label_for_entity(payload: LabelReprintRequest, db: Session = Depends(get_db)):
-    """Print a label for an item or location using stored template configuration."""
+    """Durably queue a label without requiring PrintHub during the request."""
     if not label_printing_enabled():
         raise HTTPException(status_code=400, detail="Label printing is disabled")
     if bool(payload.item_id) == bool(payload.location_id):
@@ -50,52 +57,45 @@ def print_label_for_entity(payload: LabelReprintRequest, db: Session = Depends(g
             )
             .one_or_none()
         )
-        template_id = payload.template_id or (profile.template_id if profile else None) or item_type.label_template_id
+        template_id = (
+            payload.template_id
+            or (profile.template_id if profile else None)
+            or item_type.label_template_id
+        )
         if not template_id:
             raise HTTPException(status_code=400, detail="Item type has no label_template_id")
-        try:
-            template = fetch_template(template_id)
-        except LabelServiceError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        props = item.props or {}
         location = db.get(Location, item.location_id) if item.location_id else None
-        variables = build_template_variables(
-            template,
-            props,
-            context={
-                "entity": {
-                    "id": str(item.id),
-                    "display_name": item.description or item_type.name,
-                    "description": item.description or "",
-                    "status": item.status,
-                },
-                "item": {"id": str(item.id), "type": item_type.name},
-                "location": {
-                    "id": str(location.id) if location else None,
-                    "name": location.name if location else None,
-                },
+        context = {
+            "entity": {
+                "id": str(item.id),
+                "display_name": item.description or item_type.name,
+                "description": item.description or "",
+                "status": item.status,
             },
+            "item": {"id": str(item.id), "type": item_type.name},
+            "location": {
+                "id": str(location.id) if location else None,
+                "name": location.name if location else None,
+            },
+        }
+        variables = resolve_intent_variables(
+            item.props or {},
+            context=context,
             bindings=dict(profile.bindings or {}) if profile else None,
         )
-        required_vars = [name for name in required_template_variables(template) if name != "internal_uuid"]
-        missing = [name for name in required_vars if name not in variables]
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Missing required template variables: {', '.join(missing)}",
-            )
-        variables["internal_uuid"] = str(item.id)
-        try:
-            return print_label(
-                printer_id=payload.printer_id,
-                template=template.get("template", {}),
-                variables=variables,
-                return_preview=payload.return_preview,
-                template_id=template_id,
-                origin="thingdex",
-            )
-        except LabelServiceError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        version = f"{item.updated_at.isoformat()}:{uuid4()}"
+        intent = queue_print_intent(
+            db,
+            entity_kind="item",
+            entity_id=item.id,
+            entity_version=version,
+            template_id=template_id,
+            printer_id=payload.printer_id,
+            variables=variables,
+            operation="reprint",
+        )
+        db.commit()
+        return _queued(intent, payload.printer_id)
 
     location = db.get(Location, payload.location_id)
     if not location or location.deleted_at is not None:
@@ -111,49 +111,41 @@ def print_label_for_entity(payload: LabelReprintRequest, db: Session = Depends(g
         .first()
     )
     template_id = payload.template_id or (profile.template_id if profile else None)
-    if not template_id:
-        if isinstance(location.meta, dict):
-            template_id = location.meta.get("label_template_id")
+    if not template_id and isinstance(location.meta, dict):
+        template_id = location.meta.get("label_template_id")
     if not template_id:
         raise HTTPException(status_code=400, detail="Location has no label_template_id")
-    try:
-        template = fetch_template(template_id)
-    except LabelServiceError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    required_vars = required_template_variables(template)
-    variables = build_template_variables(
-        template,
-        location.meta or {},
-        context={
-            "entity": {"id": str(location.id), "display_name": location.name},
-            "location": {
-                "id": str(location.id),
-                "name": location.name,
-                "kind": location.kind,
-                "meta": location.meta or {},
-            },
+    context = {
+        "entity": {"id": str(location.id), "display_name": location.name},
+        "location": {
+            "id": str(location.id),
+            "name": location.name,
+            "kind": location.kind,
+            "meta": location.meta or {},
         },
+    }
+    variables = resolve_intent_variables(
+        location.meta or {},
+        context=context,
         bindings=dict(profile.bindings or {}) if profile else None,
     )
-    variables.update({
-        "location_uuid": str(location.id),
-        "container_name": location.name,
-        "internal_uuid": str(location.id),
-    })
-    missing = [name for name in required_vars if name not in variables]
-    if missing:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Missing required template variables for location: {', '.join(missing)}",
-        )
-    try:
-        return print_label(
-            printer_id=payload.printer_id,
-            template=template.get("template", {}),
-            variables=variables,
-            return_preview=payload.return_preview,
-            template_id=template_id,
-            origin="thingdex",
-        )
-    except LabelServiceError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    variables.update(
+        {
+            "location_uuid": str(location.id),
+            "container_name": location.name,
+            "internal_uuid": str(location.id),
+        }
+    )
+    version = f"{location.id}:{uuid4()}"
+    intent = queue_print_intent(
+        db,
+        entity_kind="location",
+        entity_id=location.id,
+        entity_version=version,
+        template_id=template_id,
+        printer_id=payload.printer_id,
+        variables=variables,
+        operation="reprint",
+    )
+    db.commit()
+    return _queued(intent, payload.printer_id)

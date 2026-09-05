@@ -41,10 +41,14 @@ def _client_with_label_enabled(label_enabled: str):
         conn.execute(text(f'CREATE SCHEMA "{schema_name}"'))
 
     original_database_url = os.environ.get("DATABASE_URL")
+    original_admin_token = os.environ.get("THINGDEX_PRINT_ADMIN_TOKEN")
+    original_event_secret = os.environ.get("THINGDEX_PRINTHUB_EVENT_SECRET")
     query = dict(base_url.query)
     query["options"] = f"-csearch_path={schema_name}"
     os.environ["DATABASE_URL"] = base_url.set(query=query).render_as_string(hide_password=False)
     os.environ["LABEL_PRINTING_ENABLED"] = label_enabled
+    os.environ["THINGDEX_PRINT_ADMIN_TOKEN"] = "test-print-admin-token"
+    os.environ["THINGDEX_PRINTHUB_EVENT_SECRET"] = "test-event-secret"
 
     _clear_thingdex_modules()
     from thingdex import db, models
@@ -62,6 +66,14 @@ def _client_with_label_enabled(label_enabled: str):
             os.environ.pop("DATABASE_URL", None)
         else:
             os.environ["DATABASE_URL"] = original_database_url
+        if original_admin_token is None:
+            os.environ.pop("THINGDEX_PRINT_ADMIN_TOKEN", None)
+        else:
+            os.environ["THINGDEX_PRINT_ADMIN_TOKEN"] = original_admin_token
+        if original_event_secret is None:
+            os.environ.pop("THINGDEX_PRINTHUB_EVENT_SECRET", None)
+        else:
+            os.environ["THINGDEX_PRINTHUB_EVENT_SECRET"] = original_event_secret
 
 
 @pytest.fixture()

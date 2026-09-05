@@ -64,8 +64,18 @@ items return `409` with affected item IDs and validation errors.
 | `DELETE` | `/v1/items/{id}` | Soft-delete an unrelated item |
 
 Create and bulk operations are transactional for their database writes. A
-requested label print is a synchronous side effect after item persistence; its
-success or failure is reported separately and does not roll back the item.
+requested label print creates a `PrintIntent` in the same transaction as the
+inventory record. The response reports `queued` as soon as both are durable;
+availability of PrintHub cannot roll back or delay the inventory request.
+
+Authenticated operators can inspect `GET /v1/print-intents`, fetch one intent,
+or retry a terminally failed intent. These responses deliberately omit the
+resolved variable snapshot. All endpoints require `THINGDEX_PRINT_ADMIN_TOKEN`
+and fail closed when it is unset.
+
+`POST /v1/integrations/printhub/events` accepts HMAC-signed status events.
+Event IDs are idempotent and a monotonically increasing sequence prevents an
+older replay from rolling back the visible PrintHub job state.
 
 ## Relations
 

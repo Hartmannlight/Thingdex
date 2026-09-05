@@ -2174,7 +2174,7 @@
           "labels"
         ],
         "summary": "Print Label For Entity",
-        "description": "Print a label for an item or location using stored template configuration.",
+        "description": "Durably queue a label without requiring PrintHub during the request.",
         "operationId": "print_label_for_entity_v1_labels_print_post",
         "requestBody": {
           "content": {
@@ -2187,7 +2187,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -2388,6 +2388,221 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/print-intents": {
+      "get": {
+        "tags": [
+          "print-intents"
+        ],
+        "summary": "List Print Intents",
+        "operationId": "list_print_intents_v1_print_intents_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PrintIntentOut"
+                  },
+                  "title": "Response List Print Intents V1 Print Intents Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/print-intents/{intent_id}": {
+      "get": {
+        "tags": [
+          "print-intents"
+        ],
+        "summary": "Get Print Intent",
+        "operationId": "get_print_intent_v1_print_intents__intent_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "intent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Intent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintIntentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/print-intents/{intent_id}/retry": {
+      "post": {
+        "tags": [
+          "print-intents"
+        ],
+        "summary": "Retry Print Intent",
+        "operationId": "retry_print_intent_v1_print_intents__intent_id__retry_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "intent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Intent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintIntentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations/printhub/events": {
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Apply Printhub Event",
+        "operationId": "apply_printhub_event_v1_integrations_printhub_events_post",
+        "parameters": [
+          {
+            "name": "x-thingdex-signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Thingdex-Signature"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintHubEventResult"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -3624,7 +3839,7 @@
           "bytes_sent"
         ],
         "title": "LabelPrintResult",
-        "description": "Result returned after PrintHub accepted and sent a synchronous print."
+        "description": "Result returned after Thingdex durably queues or PrintHub accepts a job."
       },
       "LabelProfileCreate": {
         "properties": {
@@ -4181,6 +4396,166 @@
         "type": "object",
         "title": "LocationUpdate"
       },
+      "PrintHubEventResult": {
+        "properties": {
+          "result": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "duplicate",
+              "stale"
+            ],
+            "title": "Result"
+          },
+          "event_id": {
+            "type": "string",
+            "title": "Event Id"
+          },
+          "intent_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Intent Id"
+          },
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "result",
+          "event_id",
+          "intent_id",
+          "sequence"
+        ],
+        "title": "PrintHubEventResult"
+      },
+      "PrintIntentOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "entity_kind": {
+            "type": "string",
+            "title": "Entity Kind"
+          },
+          "entity_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Entity Id"
+          },
+          "entity_version": {
+            "type": "string",
+            "title": "Entity Version"
+          },
+          "template_id": {
+            "type": "string",
+            "title": "Template Id"
+          },
+          "printer_id": {
+            "type": "string",
+            "title": "Printer Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "delivering",
+              "accepted",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "printhub_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printhub Job Id"
+          },
+          "printhub_job_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printhub Job State"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "accepted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "entity_kind",
+          "entity_id",
+          "entity_version",
+          "template_id",
+          "printer_id",
+          "state",
+          "attempts",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PrintIntentOut",
+        "description": "Operator-safe outbox state; resolved inventory variables stay internal."
+      },
       "PropsFilter": {
         "properties": {
           "path": {
@@ -4369,6 +4744,12 @@
           "type"
         ],
         "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
       }
     }
   }

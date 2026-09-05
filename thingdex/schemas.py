@@ -82,7 +82,7 @@ class LabelPrintRequest(BaseModel):
 
 
 class LabelPrintResult(BaseModel):
-    """Result returned after PrintHub accepted and sent a synchronous print."""
+    """Result returned after Thingdex durably queues or PrintHub accepts a job."""
 
     status: Literal["sent", "queued"] = "sent"
     printer_id: str
@@ -122,6 +122,27 @@ class LabelProfileOut(LabelProfileBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+
+
+class PrintIntentOut(BaseModel):
+    """Operator-safe outbox state; resolved inventory variables stay internal."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    entity_kind: str
+    entity_id: UUID
+    entity_version: str
+    template_id: str
+    printer_id: str
+    state: Literal["pending", "delivering", "accepted", "failed"]
+    attempts: int
+    next_attempt_at: datetime | None = None
+    last_error: str | None = None
+    printhub_job_id: str | None = None
+    printhub_job_state: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    accepted_at: datetime | None = None
 
 
 class SideEffectResult(BaseModel):

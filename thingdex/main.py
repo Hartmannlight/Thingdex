@@ -8,9 +8,11 @@ from thingdex.crud import ensure_root_location, get_root_location
 from thingdex.db import SessionLocal
 from thingdex.routes.item_types import router as item_types_router
 from thingdex.routes.items import router as items_router
+from thingdex.routes.integrations import router as integrations_router
 from thingdex.routes.label_profiles import router as label_profiles_router
 from thingdex.routes.labels import router as labels_router
 from thingdex.routes.locations import router as locations_router
+from thingdex.routes.print_intents import router as print_intents_router
 from thingdex.routes.relations import router as relations_router
 from thingdex.schemas import HealthResponse
 from thingdex.validation import SchemaValidationError
@@ -69,3 +71,5 @@ app.include_router(items_router)
 app.include_router(relations_router)
 app.include_router(labels_router)
 app.include_router(label_profiles_router)
+app.include_router(print_intents_router)
+app.include_router(integrations_router)

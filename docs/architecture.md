@@ -23,7 +23,9 @@
 | `thingdex/validation.py` | Item-type schema and property validation |
 | `thingdex/crud.py` | Shared recursive queries and domain helpers |
 | `thingdex/routes/` | HTTP endpoints grouped by resource |
-| `thingdex/labeling.py` | Label-template and printer clients |
+| `thingdex/labeling.py` | Template metadata compatibility client used by profile administration |
+| `thingdex/print_intents.py` | Transactional outbox and idempotent PrintHub connector |
+| `thingdex/print_worker.py` | Separately scalable outbox worker process |
 | `alembic/` | Ordered database migrations |
 | `openapi.json` | Committed external API contract |
 
@@ -33,8 +35,13 @@
 2. A route dependency opens a SQLAlchemy session.
 3. The route resolves referenced entities and checks domain invariants.
 4. Item properties are validated against the stored item-type schema.
-5. All database changes for the operation are committed atomically.
+5. Inventory changes and any requested `PrintIntent` are committed atomically.
 6. FastAPI serializes the declared response model.
+
+The API process never contacts PrintHub while saving inventory. A separate
+worker claims due outbox rows with `FOR UPDATE SKIP LOCKED`, leases each claim,
+and submits the stable idempotency key. A worker crash can safely reclaim an
+expired lease because PrintHub treats the submission as idempotent.
 
 Database constraints duplicate the most important service checks so accidental
 or concurrent writes cannot silently create invalid root locations or multiple

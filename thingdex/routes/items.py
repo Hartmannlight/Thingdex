@@ -18,14 +18,10 @@ from thingdex.crud import (
 )
 from thingdex.db import SessionLocal
 from thingdex.labeling import (
-    LabelServiceError,
-    build_template_variables,
-    fetch_template,
     label_printing_enabled,
-    print_label,
-    required_template_variables,
 )
 from thingdex.models import Item, ItemPropHistory, ItemRelation, ItemSnapshot, ItemType, LabelProfile, Location
+from thingdex.print_intents import queue_print_intent, resolve_intent_variables
 from thingdex.schemas import (
     ItemBulkCreate,
     ItemBulkMove,
@@ -45,6 +41,7 @@ from thingdex.schemas import (
     ItemSnapshotCreate,
     ItemSnapshotOut,
     ItemUpdate,
+    LabelPrintResult,
     SearchRequest,
     LabelPrintRequest,
     SideEffectResult,
@@ -110,8 +107,7 @@ def create_item(payload: ItemCreate, db: Session = Depends(get_db)):
         props=props,
     )
     db.add(item)
-    db.commit()
-    db.refresh(item)
+    db.flush()
 
     if label_request is not None and label_print_result is not None:
         template_id = label_request.template_id or item_type.label_template_id
@@ -120,48 +116,39 @@ def create_item(payload: ItemCreate, db: Session = Depends(get_db)):
         if not label_print_result.error and not template_id:
             label_print_result.error = "Item type has no label_template_id"
         elif not label_print_result.error:
-            try:
-                template = fetch_template(template_id)
-                variables = build_template_variables(
-                    template,
-                    props,
-                    context={
-                        "entity": {
-                            "id": str(item.id),
-                            "display_name": item.description or item_type.name,
-                            "description": item.description or "",
-                            "status": item.status,
-                        },
-                        "item": {"id": str(item.id), "type": item_type.name},
-                        "location": {"id": str(location.id), "name": location.name},
-                    },
-                    bindings=profile_bindings,
-                )
-                required_vars = [name for name in required_template_variables(template) if name != "internal_uuid"]
-                missing = [name for name in required_vars if name not in variables]
-                if missing:
-                    label_print_result.error = (
-                        "Missing required template variables: "
-                        f"{', '.join(missing)}"
-                    )
-                    return ItemCreateResponse(
-                        data=item,
-                        side_effects=SideEffects(label_print=label_print_result),
-                    )
-                variables["internal_uuid"] = str(item.id)
-                print_response = print_label(
-                    printer_id=label_request.printer_id,
-                    template=template.get("template", {}),
-                    variables=variables,
-                    return_preview=label_request.return_preview,
-                    template_id=template_id,
-                    idempotency_key=f"thingdex:item:{item.id}:create",
-                    origin="thingdex",
-                )
-                label_print_result.success = True
-                label_print_result.result = print_response
-            except LabelServiceError as exc:
-                label_print_result.error = str(exc)
+            context = {
+                "entity": {
+                    "id": str(item.id),
+                    "display_name": item.description or item_type.name,
+                    "description": item.description or "",
+                    "status": item.status,
+                },
+                "item": {"id": str(item.id), "type": item_type.name},
+                "location": {"id": str(location.id), "name": location.name},
+            }
+            variables = resolve_intent_variables(
+                props, context=context, bindings=profile_bindings
+            )
+            intent = queue_print_intent(
+                db,
+                entity_kind="item",
+                entity_id=item.id,
+                entity_version="1",
+                template_id=template_id,
+                printer_id=label_request.printer_id,
+                variables=variables,
+                operation="create",
+            )
+            label_print_result.success = True
+            label_print_result.result = LabelPrintResult(
+                status="queued",
+                printer_id=label_request.printer_id,
+                bytes_sent=0,
+                job_id=str(intent.id),
+                job_state="pending",
+            )
+    db.commit()
+    db.refresh(item)
     return ItemCreateResponse(
         data=item,
         side_effects=SideEffects(label_print=label_print_result),
