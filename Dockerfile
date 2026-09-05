@@ -16,11 +16,13 @@ ENV POETRY_VIRTUALENVS_IN_PROJECT=true \
 COPY pyproject.toml poetry.lock README.md /app/
 RUN python -m pip install --no-cache-dir "poetry==${POETRY_VERSION}" \
     && poetry check --lock \
-    && poetry sync --only main --no-root
+    && poetry sync --only main --no-root \
+    && /app/.venv/bin/python -m pip uninstall -y pip setuptools wheel jaraco.context
 
 FROM base AS runtime
 
-RUN groupadd --system thingdex \
+RUN python -m pip uninstall -y pip setuptools wheel jaraco.context \
+    && groupadd --system thingdex \
     && useradd --system --gid thingdex --home-dir /app thingdex
 
 COPY --from=dependencies /app/.venv /app/.venv

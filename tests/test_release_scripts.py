@@ -32,6 +32,13 @@ def test_container_runtime_can_import_application_during_migrations() -> None:
     assert "python -m alembic upgrade head" in entrypoint
 
 
+def test_container_runtime_excludes_build_tooling() -> None:
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    command = "python -m pip uninstall -y pip setuptools wheel jaraco.context"
+    assert f"/app/.venv/bin/{command}" in dockerfile
+    assert command in dockerfile
+
+
 def test_container_diagnostics_expose_only_lifecycle_facts(monkeypatch) -> None:
     captured = []
 
