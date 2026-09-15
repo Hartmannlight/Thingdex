@@ -1,14 +1,6 @@
 name: Backend CI
-
-on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_call:
-
 permissions:
   contents: read
-
 jobs:
   verify:
     runs-on: ubuntu-24.04
@@ -20,29 +12,51 @@ jobs:
           POSTGRES_PASSWORD: thingdex
           POSTGRES_DB: thingdex_test
         ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U thingdex -d thingdex_test"
-          --health-interval 5s
-          --health-timeout 5s
+        - 5432:5432
+        options: --health-cmd "pg_isready -U thingdex -d thingdex_test" --health-interval 5s --health-timeout 5s
           --health-retries 20
     env:
       DATABASE_URL: postgresql+psycopg://thingdex:thingdex@localhost:5432/thingdex_test
       THINGDEX_TEST_DATABASE_URL: postgresql+psycopg://thingdex:thingdex@localhost:5432/thingdex_test
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.13"
-      - run: pipx install poetry==2.4.1
-      - run: poetry install --all-extras
-      - run: poetry run alembic upgrade head
-      - run: poetry run alembic check
-      - run: poetry run python scripts/check_openapi.py
-      - run: poetry run pytest
-      - run: poetry run mkdocs build --strict
-
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+      with:
+        python-version: '3.13'
+    - run: pipx install poetry==2.4.1
+    - run: poetry install --all-extras
+    - run: poetry run alembic upgrade head
+    - run: poetry run alembic check
+    - run: poetry run python scripts/check_openapi.py
+    - run: poetry run pytest
+    - run: poetry run mkdocs build --strict
   container:
     uses: ./.github/workflows/container-gate.yml
+  maintenance-gate:
+    name: ci-gate
+    if: always()
+    needs:
+    - verify
+    - container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+    - name: Require every check
+      env:
+        RESULTS: ${{ toJSON(needs) }}
+      run: |
+        python3 - <<'PY'
+        import json, os
+        results = json.loads(os.environ['RESULTS'])
+        failed = {name: value['result'] for name, value in results.items() if value['result'] not in ('success',)}
+        if failed:
+            raise SystemExit(str(failed))
+        PY
+'on':
+  pull_request: null
+  push:
+    branches:
+    - main
+  workflow_call: null
