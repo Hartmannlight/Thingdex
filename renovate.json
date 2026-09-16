@@ -2,5 +2,20 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>Hartmannlight/pipeline-toolkit"
+  ],
+  "packageRules": [
+    {
+      "description": "The isolated PEP 517 backend is not a project dependency in poetry.lock. Runtime dependencies still require artifact updates.",
+      "matchManagers": [
+        "poetry"
+      ],
+      "matchDepTypes": [
+        "build-system.requires"
+      ],
+      "matchPackageNames": [
+        "poetry-core"
+      ],
+      "skipArtifactsUpdate": true
+    }
   ]
 }
