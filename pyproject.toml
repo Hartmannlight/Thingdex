@@ -14,7 +14,7 @@ dependencies = [
     "psycopg[binary]>=3.3.5",
     "pydantic>=2.13.5",
     "sqlalchemy>=2.0.53",
-    "uvicorn[standard]>=0.30",
+    "uvicorn[standard]>=0.53.0",
 ]
 
 [project.optional-dependencies]
